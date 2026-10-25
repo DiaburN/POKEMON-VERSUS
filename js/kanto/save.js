@@ -11,8 +11,11 @@
  *     beltLoadout: { heal, pp, revive, ball, utility },   // ids de objeto de la bolsa (o null)
  *     currencies: { pokecoins },
  *     dex: { seen: { dex: t }, caught: { dex: t } },
- *     regionProgress: { kanto: { starter, discoveredZones: { id: t }, leagueCleared,
- *                                statics: { "zona:dex": t }, gifts: { id: t }, zoneStats: { id: {...} } } }
+ *     regionProgress: { kanto: { starter, discoveredZones: { id: t }, lastCheckpoint, leagueCleared,
+ *                                statics: { "tramo:dex": t }, gifts: { id: t }, zoneStats: { id: {...} } } }
+ *
+ * discoveredZones son los checkpoints alcanzados (uno al empezar cada tramo del
+ * mundo continuo, ver js/kanto/worldgen.js); lastCheckpoint, el último pisado.
  *   }
  *
  * Migración: G.DB (v3 -> v4) llama a migrate(); una partida sin Kanto recibe
@@ -20,7 +23,7 @@
  * forma sube schemaVersion y se migra en migrate().
  */
 G.KSave = (() => {
-  const SCHEMA = 1;
+  const SCHEMA = 2;
   const C = () => G.KCFG;
   const isObj = v => v && typeof v === 'object' && !Array.isArray(v);
   const int = (v, max = 1e9) => (Number.isFinite(+v) && +v > 0 ? Math.min(max, Math.floor(+v)) : 0);
@@ -39,7 +42,50 @@ G.KSave = (() => {
     };
   }
   function blankRegion() {
-    return { starter: null, discoveredZones: {}, leagueCleared: false, statics: {}, gifts: {}, zoneStats: {} };
+    return { starter: null, discoveredZones: {}, lastCheckpoint: null, leagueCleared: false, statics: {}, gifts: {}, zoneStats: {} };
+  }
+
+  // Schema 1 -> 2: las 19 zonas sueltas pasan a ser tramos del mundo continuo.
+  const OLD_IDS = {
+    kanto_01_route_green: ['kanto_01_pallet_route1', 'kanto_02_viridian_route2'],
+    kanto_02_viridian_forest: ['kanto_03_viridian_forest'],
+    kanto_03_pewter_mt_moon: ['kanto_04_pewter_route3', 'kanto_05_mt_moon'],
+    kanto_04_cerulean_meadows: ['kanto_06_route4', 'kanto_07_routes_24_25', 'kanto_08_routes_5_6'],
+    kanto_05_vermilion_coast: ['kanto_09_route11'],
+    kanto_06_diglett_cave: ['kanto_10_digletts_cave'],
+    kanto_07_rock_tunnel: ['kanto_11_routes_9_10', 'kanto_12_rock_tunnel'],
+    kanto_08_lavender_tower: ['kanto_14_pokemon_tower'],
+    kanto_09_celadon_saffron: ['kanto_13_routes_7_8'],
+    kanto_10_fuchsia_routes: ['kanto_15_routes_12_15', 'kanto_16_routes_16_18'],
+    kanto_11_safari_zone: ['kanto_17_safari'],
+    kanto_12_power_plant: ['kanto_20_power_plant'],
+    kanto_13_sea_routes: ['kanto_18_sea_routes'],
+    kanto_14_seafoam: ['kanto_19_seafoam'],
+    kanto_15_cinnabar: ['kanto_21_pokemon_mansion'],
+    kanto_16_viridian_highlands: ['kanto_22_route23'],
+    kanto_17_victory_road: ['kanto_23_victory_road'],
+    kanto_18_indigo_league: ['kanto_league'],
+    kanto_19_cerulean_cave: ['kanto_24_cerulean_cave']
+  };
+  /** Cambia los ids viejos de un mapa { id: valor } (o { "id:dex": valor }) por los nuevos. */
+  function remapKeys(o, all) {
+    const out = {};
+    for (const [key, v] of Object.entries(o)) {
+      const [id, rest] = key.split(/:(.*)/s);
+      const to = OLD_IDS[id];
+      if (!to) { out[key] = v; continue; }
+      for (const n of (all ? to : to.slice(-1))) {
+        const k2 = rest != null ? n + ':' + rest : n;
+        if (out[k2] == null) out[k2] = v;
+      }
+    }
+    return out;
+  }
+  function migrateRegion(r, from) {
+    if (from >= 2) return;
+    r.discoveredZones = remapKeys(r.discoveredZones, true);
+    r.statics = remapKeys(r.statics, false);
+    r.zoneStats = remapKeys(r.zoneStats, false);
   }
 
   /** Rellena / convierte el bloque Kanto de una partida (cualquier versión). */
@@ -51,7 +97,14 @@ G.KSave = (() => {
     if (!isObj(k.regionProgress)) k.regionProgress = {};
     const r = k.regionProgress.kanto = Object.assign(blankRegion(), k.regionProgress.kanto);
     for (const key of ['discoveredZones', 'statics', 'gifts', 'zoneStats']) if (!isObj(r[key])) r[key] = {};
-    // (schemaVersion 1 es la primera; aquí irán las conversiones de las siguientes.)
+    migrateRegion(r, +k.schemaVersion || 1);
+    if ((+k.schemaVersion || 1) < 2 && isObj(k.pokemonInstances)) {
+      for (const p of Object.values(k.pokemonInstances)) {
+        const c = isObj(p) && isObj(p.caught) ? p.caught : null;
+        if (c && OLD_IDS[c.zoneId]) c.zoneId = OLD_IDS[c.zoneId][0];
+      }
+    }
+    if (r.lastCheckpoint != null && typeof r.lastCheckpoint !== 'string') r.lastCheckpoint = null;
     k.schemaVersion = SCHEMA;
     return s;
   }
@@ -113,6 +166,7 @@ G.KSave = (() => {
       for (const z in rb[key] || {}) if (!ra[key][z]) ra[key][z] = rb[key][z];
     }
     ra.leagueCleared = !!(ra.leagueCleared || rb.leagueCleared);
+    if (ra.lastCheckpoint == null) ra.lastCheckpoint = rb.lastCheckpoint || null;
     if (ra.starter == null) ra.starter = rb.starter;
     a.dex = a.dex || { seen: {}, caught: {} };
     for (const key of ['seen', 'caught']) {

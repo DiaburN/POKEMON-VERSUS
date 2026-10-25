@@ -64,12 +64,12 @@ G.KLoot = {
 
   // Extras por zona: se añaden a la tabla indicada (lo especial de cada sitio).
   ZONE_EXTRA: {
-    kanto_03_pewter_mt_moon: { rock: [{ item: 'moon-stone', w: 4 }], chest: [{ item: 'moon-stone', w: 6 }],
+    kanto_05_mt_moon:       { rock: [{ item: 'moon-stone', w: 4 }], chest: [{ item: 'moon-stone', w: 6 }],
                                bigchest: [{ item: 'helix-fossil', w: 8 }, { item: 'dome-fossil', w: 8 }] },
-    kanto_09_celadon_saffron: { bigchest: [{ item: 'link-cable', w: 4 }] },
-    kanto_12_power_plant: { chest: [{ item: 'thunder-stone', w: 5 }] },
-    kanto_15_cinnabar: { chest: [{ item: 'fire-stone', w: 5 }], bigchest: [{ item: 'old-amber', w: 4 }] },
-    kanto_13_sea_routes: { chest: [{ item: 'water-stone', w: 5 }] },
-    kanto_04_cerulean_meadows: { chest: [{ item: 'leaf-stone', w: 3 }] }
+    kanto_13_routes_7_8: { bigchest: [{ item: 'link-cable', w: 4 }] },
+    kanto_20_power_plant: { chest: [{ item: 'thunder-stone', w: 5 }] },
+    kanto_21_pokemon_mansion: { chest: [{ item: 'fire-stone', w: 5 }], bigchest: [{ item: 'old-amber', w: 4 }] },
+    kanto_18_sea_routes: { chest: [{ item: 'water-stone', w: 5 }] },
+    kanto_06_route4: { chest: [{ item: 'leaf-stone', w: 3 }] }
   }
 };

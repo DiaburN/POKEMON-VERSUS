@@ -1016,8 +1016,9 @@
           if (G.Coop.isHost) G.Coop.enemyGone(e, true);
           continue;
         }
-        // Modo Kanto: los salvajes viven en su zona (ver js/kanto/wild.js), sin rezagados.
-        if (e.wild) continue;
+        // Modo Kanto: los salvajes viven en su tramo (ver js/kanto/wild.js), sin rezagados;
+        // los que se quedan muy lejos los retira js/kanto/zone.js marcándolos `gone`.
+        if (e.wild) { if (e.gone) { list.splice(i, 1); byId.delete(e.id); } continue; }
         const near = nearestPlayer(players, e.x, e.y) || pl;
         // El duende del tesoro se escapa si no lo atrapas a tiempo.
         if (e.behavior === 'thief' && (e.life -= dt) <= 0) {

@@ -1,65 +1,32 @@
-/* ============ zones.js — zonas de Kanto (datos + validación) ============
- * Junta la semilla de zonas (KANTO_ZONES_V1.json -> js/data/kanto-zones.js)
- * con su mapa (js/data/kanto-maps.js) y la convierte en Zone:
+/* ============ zones.js — tramos de Kanto (datos + validación) ============
+ * Convierte cada tramo de G.KANTO_WORLD (js/data/kanto-world.js) en Zone:
  *
- *   { id, regionId, name, recommendedLevel: [min, max], theme, pvpMode,
- *     map, exits, playerSpawns, safe, wildSpawnGroups, chestSpawns,
- *     destructibles, staticBosses, gauntlet, special }
+ *   { id, order, regionId, name, ref, recommendedLevel: [min, max], size, style, theme, type,
+ *     pvpMode, density: [min, max], entries: [{ dex, minLevel, maxLevel, rarity, tier, weight }],
+ *     staticBosses: [{ dex, level, kind, respawnClass }], gauntlet, requires }
  *
- * validate() comprueba todo lo que la especificación pide (apartado 34) y,
- * sobre todo, que ningún salvaje que evoluciona por nivel salga a su nivel de
- * evolución o más (Caterpie nunca a Nv.7+). En desarrollo, una zona inválida
- * avisa en la consola al cargar; las pruebas (tests/kanto.test.cjs) fallan.
+ * Los niveles de la fauna salen del rango del tramo y del escalón (tiers):
+ * los comunes abajo, los raros arriba, los élite por encima del máximo. Una
+ * forma que evoluciona por nivel nunca sale a ese nivel o más (Caterpie,
+ * siempre por debajo de Nv.7): se queda en los niveles justo anteriores.
+ *
+ * Dónde está cada tramo en el mundo lo sabe G.KWorld (js/kanto/worldgen.js).
  */
 G.KZones = (() => {
   const C = () => G.KCFG;
+  const D = () => G.KANTO_WORLD;
   const RARITIES = ['common', 'uncommon', 'rare', 'very_rare'];
   let list = null, by = null;
 
-  function rectOf(m) { return { x: m.x, y: m.y, w: m.w, h: m.h }; }
+  // Temas que tienen paleta: las de G.Tiles.ARENA_THEMES más los biomas base.
+  const BASE = { forest: 0, crystal: 1, ash: 2 };
+  const THEMES = ['normal', 'fire', 'water', 'grass', 'electric', 'ice', 'fighting', 'poison', 'ground', 'flying',
+                  'psychic', 'bug', 'rock', 'ghost', 'dragon', 'dark', 'steel', 'fairy', 'judgment', ...Object.keys(BASE)];
+  // Tipo que representa cada tema (icono y color en la lista de tramos).
+  const TYPE_OF = { forest: 'grass', crystal: 'rock', ash: 'fire', judgment: 'fighting' };
 
-  function build(seed, map) {
-    const mk = (map && map.markers) || {};
-    const entries = seed.wild.filter(w => !C().NEVER_WILD.includes(w.dex)).map(w => ({
-      dex: w.dex, minLevel: w.level[0], maxLevel: w.level[1], rarity: w.rarity,
-      weight: C().RARITY_WEIGHT[w.rarity] || 1
-    }));
-    const statics = (seed.staticBoss || []).concat((C().EXTRA_STATICS[seed.id] || []))
-      .map((s, i) => Object.assign({ tx: ((mk.boss || [])[i] || (mk.boss || [])[0] || {}).tx, ty: ((mk.boss || [])[i] || (mk.boss || [])[0] || {}).ty }, s));
-    return {
-      id: seed.id, regionId: seed.region || C().REGION, name: seed.name, ref: seed.originalReference || '',
-      recommendedLevel: seed.recommendedLevel.slice(), theme: seed.theme, pvpMode: seed.pvpMode,
-      map: map || null,
-      exits: (mk.exits || []).slice(), playerSpawns: (mk.spawn || []).slice(), safe: (mk.safe || []).map(rectOf),
-      wildSpawnGroups: entries.length ? (mk.wild || []).map((g, i) => ({
-        id: seed.id + ':g' + i, rect: rectOf(g), maxAlive: g.maxAlive || C().MAX_ALIVE_DEFAULT,
-        entries, respawn: C().RESPAWN
-      })) : [],
-      chestSpawns: (mk.chest || []).slice(),
-      destructibles: map ? map.props.filter(p => p.type !== 'tree' && p.type !== 'spring').length : 0,
-      staticBosses: statics,
-      gauntlet: seed.gauntlet || null,
-      special: seed.special || []
-    };
-  }
-
-  function load() {
-    const seed = G.KANTO_ZONES_SEED, maps = G.KANTO_MAPS || {};
-    list = seed.zones.map(z => build(z, maps[z.id]));
-    by = {};
-    for (const z of list) by[z.id] = z;
-    return list;
-  }
-
-  const all = () => list || load();
-  const get = id => (by || (load(), by))[id] || null;
-
-  /** Especies que pueden salir en una zona (para la ficha). */
-  function species(z) {
-    const s = new Set();
-    for (const g of z.wildSpawnGroups) for (const e of g.entries) s.add(e.dex);
-    return [...s];
-  }
+  /** Índice de bioma (G.Tiles.BIOMES) de un tema. */
+  function paletteOf(theme) { return theme in BASE ? BASE[theme] : G.Tiles.arenaBiome(theme); }
 
   /** El nivel más bajo al que esa especie evoluciona por nivel (o Infinity). */
   function levelEvoCap(dex) {
@@ -67,79 +34,85 @@ G.KZones = (() => {
     return Math.min(Infinity, ...ev.filter(e => e.method === 'level').map(e => e.level));
   }
 
-  // ---------------- validación ----------------
-
-  function validateMap(m) {
-    const err = [];
-    if (!m) return ['sin mapa'];
-    if (!(m.w > 0 && m.h > 0) || !Array.isArray(m.rows) || m.rows.length !== m.h) err.push('tamaño o filas incorrectos');
-    if (m.rows && m.rows.some(r => r.length !== m.w)) err.push('alguna fila no mide ' + m.w);
-    if (m.rows && m.rows.some(r => /[^.#~]/.test(r))) err.push('letras de terreno desconocidas');
-    const tile = (x, y) => (x < 0 || y < 0 || x >= m.w || y >= m.h ? '#' : m.rows[y][x]);
-    const inside = (x, y) => x >= 0 && y >= 0 && x < m.w && y < m.h;
-    const PROPS = ['tree', 'rock', 'chest', 'grass', 'spring', 'bigchest', 'trap'];
-    for (const p of m.props || []) {
-      if (!PROPS.includes(p.type)) err.push('objeto desconocido ' + p.type);
-      if (!inside(p.tx, p.ty) || tile(p.tx, p.ty) !== '.') err.push(p.type + ' fuera del suelo en ' + p.tx + ',' + p.ty);
-    }
-    const mk = m.markers || {};
-    if (!(mk.spawn || []).length) err.push('sin punto de entrada');
-    if (!(mk.exits || []).length) err.push('sin salida');
-    for (const key of ['spawn', 'exits', 'boss', 'chest']) {
-      for (const p of mk[key] || []) {
-        if (!inside(p.tx, p.ty)) err.push(key + ' fuera del mapa en ' + p.tx + ',' + p.ty);
-        else if (tile(p.tx, p.ty) !== '.') err.push(key + ' en pared o líquido en ' + p.tx + ',' + p.ty);
+  /** Fauna del tramo con sus niveles. */
+  function entriesOf(z) {
+    const [a, b] = z.level, r = b - a, out = [];
+    for (const [tier, dexes] of Object.entries(z.fauna || {})) {
+      const T = D().tiers[tier] || { rarity: tier };
+      for (const dex of dexes) {
+        if (C().NEVER_WILD.includes(dex)) continue;
+        let lo = Math.round(a + r * (T.from || 0)) - (T.minus || 0), hi = Math.round(a + r * (T.to == null ? 1 : T.to)) + (T.plus || 0);
+        const cap = levelEvoCap(dex);
+        if (hi >= cap) { hi = cap - 1; lo = Math.min(lo, hi - 2); }
+        lo = Math.max(1, Math.min(lo, hi)); hi = Math.min(C().MAX_LEVEL, hi);
+        out.push({ dex, minLevel: lo, maxLevel: hi, rarity: T.rarity, tier,
+                   weight: T.weight || C().RARITY_WEIGHT[T.rarity] || 1 });
       }
     }
-    for (const r of [...(mk.wild || []), ...(mk.safe || [])]) {
-      if (!(r.w > 0 && r.h > 0) || r.x < 0 || r.y < 0 || r.x + r.w > m.w || r.y + r.h > m.h) err.push('zona fuera del mapa');
-    }
-    for (const r of mk.wild || []) {
-      let ok = false;
-      for (let y = r.y; y < r.y + r.h && !ok; y++) for (let x = r.x; x < r.x + r.w; x++) if (tile(x, y) === '.') { ok = true; break; }
-      if (!ok) err.push('zona de salvajes sin suelo en ' + r.x + ',' + r.y);
-    }
-    return err;
+    return out;
   }
 
-  /** Lista de errores de una zona ([] = válida). */
+  function build(z, i) {
+    return {
+      id: z.id, order: i + 1, regionId: C().REGION, name: z.name, ref: z.ref || '',
+      recommendedLevel: z.level.slice(), size: z.size, style: z.style, theme: z.theme, type: TYPE_OF[z.theme] || z.theme,
+      pvpMode: z.pvpMode || 'duel_opt_in', density: (z.density || [0, 0]).slice(),
+      entries: entriesOf(z),
+      staticBosses: (z.bosses || []).map(b => ({ dex: b.dex, level: b.level, kind: b.kind,
+        respawnClass: b.kind === 'legendary' ? (b.dex === 150 ? 'mythic' : 'legendary') : 'event' })),
+      tiers: Object.keys(z.fauna || {}), gauntlet: z.gauntlet || null, requires: z.requires || null, notes: z.notes || ''
+    };
+  }
+
+  function load() {
+    list = D().zones.map(build);
+    by = {};
+    for (const z of list) by[z.id] = z;
+    return list;
+  }
+
+  const all = () => list || load();
+  const get = id => (by || (load(), by))[id] || null;
+  const next = z => all()[z.order] || null;
+  const prev = z => all()[z.order - 2] || null;
+
+  /** Especies que pueden salir en un tramo (para la ficha). */
+  function species(z) { return [...new Set(z.entries.map(e => e.dex))]; }
+
+  // ---------------- validación ----------------
+
+  /** Lista de errores de un tramo ([] = válido). */
   function validate(z) {
     const err = [];
-    if (!THEMES.includes(z.theme)) err.push('tema desconocido: ' + z.theme);
-    if (!['duel_opt_in', 'none', 'open'].includes(z.pvpMode)) err.push('pvpMode desconocido: ' + z.pvpMode);
+    if (!THEMES.includes(z.theme)) err.push(z.id + ': tema desconocido ' + z.theme);
+    if (!D().styles[z.style]) err.push(z.id + ': estilo desconocido ' + z.style);
+    const raw = D().zones.find(o => o.id === z.id) || {};
+    if (!(raw.minutes || D().minutes[z.size]) || !(raw.width || D().width[z.size])) err.push(z.id + ': clase de tamaño sin minutos o ancho: ' + z.size);
+    if (!['duel_opt_in', 'none', 'open'].includes(z.pvpMode)) err.push(z.id + ': pvpMode desconocido ' + z.pvpMode);
     const [a, b] = z.recommendedLevel;
-    if (!(a >= 1 && b <= C().MAX_LEVEL && a <= b)) err.push('nivel recomendado incorrecto');
-    for (const g of z.wildSpawnGroups) for (const e of g.entries) {
+    if (!(a >= 1 && b <= C().MAX_LEVEL && a <= b)) err.push(z.id + ': nivel recomendado incorrecto');
+    for (const tier of z.tiers || []) if (!D().tiers[tier]) err.push(z.id + ': escalón desconocido ' + tier);
+    for (const e of z.entries) {
       const tag = z.id + ' #' + e.dex;
       if (!G.GEN1.BY[e.dex]) { err.push(tag + ': especie desconocida'); continue; }
+      if (D().specialAcquisition.includes(e.dex)) err.push(tag + ': es de adquisición especial');
       if (!(e.minLevel <= e.maxLevel)) err.push(tag + ': nivel mínimo > máximo');
-      if (e.minLevel < 1 || e.maxLevel > C().MAX_LEVEL) err.push(tag + ': nivel fuera de 1..100');
-      if (!RARITIES.includes(e.rarity)) err.push(tag + ': rareza desconocida ' + e.rarity);
-      const cap = levelEvoCap(e.dex);
-      if (e.maxLevel >= cap) err.push(tag + ': sale a Nv.' + e.maxLevel + ' pero evoluciona a Nv.' + cap);
-      if (C().NEVER_WILD.includes(e.dex)) err.push(tag + ': legendario como salvaje normal');
+      if (D().tiers[e.tier] && !RARITIES.includes(e.rarity)) err.push(tag + ': rareza desconocida ' + e.rarity);
+      if (e.maxLevel >= levelEvoCap(e.dex)) err.push(tag + ': sale a Nv.' + e.maxLevel + ' pero evoluciona a Nv.' + levelEvoCap(e.dex));
     }
     for (const s of z.staticBosses) {
-      if (!G.GEN1.BY[s.dex]) err.push(z.id + ' estático #' + s.dex + ' desconocido');
-      if (!Number.isInteger(s.level) || s.level < 1 || s.level > C().MAX_LEVEL) err.push(z.id + ' estático #' + s.dex + ': nivel fijo incorrecto');
-      if (s.tx == null) err.push(z.id + ' estático #' + s.dex + ': sin marcador en el mapa');
+      if (!G.GEN1.BY[s.dex]) err.push(z.id + ' jefe #' + s.dex + ' desconocido');
+      if (!Number.isInteger(s.level) || s.level < 1 || s.level > C().MAX_LEVEL) err.push(z.id + ' jefe #' + s.dex + ': nivel incorrecto');
     }
-    if (!z.wildSpawnGroups.length && !z.gauntlet && species(z).length) err.push(z.id + ': salvajes sin zona de aparición');
-    for (const e of validateMap(z.map)) err.push(z.id + ' mapa: ' + e);
+    if (!z.gauntlet && !z.entries.length) err.push(z.id + ': sin fauna');
     return err;
   }
 
-  function validateAll() { return all().flatMap(validate); }
-
-  // Temas que tienen paleta (las de G.Tiles.ARENA_THEMES; aquí también para las pruebas sin tiles.js).
-  const THEMES = ['normal', 'fire', 'water', 'grass', 'electric', 'ice', 'fighting', 'poison', 'ground', 'flying',
-                  'psychic', 'bug', 'rock', 'ghost', 'dragon', 'dark', 'steel', 'fairy'];
-
-  /** ¿Está (x, y) en mundo dentro de la zona segura de la entrada? */
-  function inSafe(z, x, y) {
-    const TS = G.World.TS;
-    return z.safe.some(r => x >= r.x * TS && y >= r.y * TS && x < (r.x + r.w) * TS && y < (r.y + r.h) * TS);
+  function validateAll() {
+    const ids = new Set(), err = [];
+    for (const z of all()) { if (ids.has(z.id)) err.push('id repetido ' + z.id); ids.add(z.id); err.push(...validate(z)); }
+    return err;
   }
 
-  return { all, get, load, build, species, levelEvoCap, validate, validateMap, validateAll, inSafe, THEMES };
+  return { all, get, next, prev, load, build, entriesOf, species, levelEvoCap, validate, validateAll, paletteOf, THEMES, TYPE_OF };
 })();

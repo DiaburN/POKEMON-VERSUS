@@ -23,14 +23,13 @@
 
   class WildMon extends G.Enemy {
     /**
-     * @param o { dex, level, x, y, group?, rarity?, boss?, trainer?, staticKey? }
+     * @param o { dex, level, x, y, rarity?, boss?, trainer?, staticKey? }
      */
     constructor(o) {
       const sp = G.DEX_BY[o.dex];
       super({ dex: o.dex, name: sp ? sp.name : '', hp: 1, spd: 1, dmg: 1, xp: 0, behavior: 'wild' }, o.x, o.y, { hp: 1, spd: 1, dmg: 1 }, !!o.boss);
       this.wild = true;
       this.level = o.level;
-      this.group = o.group || null;
       this.rarity = o.rarity || 'common';
       this.trainer = !!o.trainer;
       this.staticKey = o.staticKey || null;

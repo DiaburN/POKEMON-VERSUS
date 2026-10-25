@@ -22,10 +22,14 @@ function boot() {
   const load = f => vm.runInContext(source(f), ctx, { filename: f });
   ['js/core/util.js', 'js/data/pokedex.js', 'js/data/moves.js', 'js/data/items.js',
    'js/data/gen1-progression.js', 'js/data/gen1-moves-meta.js', 'js/data/kanto-config.js', 'js/data/kanto-items.js',
-   'js/data/loot-tables.js', 'js/data/kanto-zones.js', 'js/data/kanto-maps.js',
+   'js/data/loot-tables.js', 'js/data/kanto-world.js',
    'js/kanto/pokemon.js', 'js/kanto/moves.js', 'js/kanto/damage.js', 'js/kanto/save.js', 'js/kanto/zones.js',
    'js/kanto/loot.js', 'js/kanto/rewards.js', 'js/kanto/use.js'].forEach(load);
   const G = ctx.G;
+  // El mundo sólo necesita el tamaño de casilla y las paletas (sin lienzo).
+  G.Sprites = G.Sprites || { PX: 2 };
+  G.World = { TS: 32 };
+  load('js/world/tiles.js'); load('js/kanto/worldgen.js');
   const save = { kanto: G.KSave.blank() };
   G.DB = { save, commits: 0, commit() { this.commits++; } };
   return { G, save, load };
@@ -81,38 +85,114 @@ test('todos los movimientos existen y se pueden usar (los que faltan, con efecto
 
 // ---------------- ZONAS ----------------
 
-test('zonas: las 19 de KANTO_ZONES_V1 son válidas (especies, niveles, temas, mapas, estáticos)', () => {
+test('tramos: los 25 de KANTO_WORLD_SPEC son válidos (especies, niveles, temas, estáticos)', () => {
   const { G } = boot();
-  assert.equal(G.KZones.all().length, 19);
+  assert.equal(G.KZones.all().length, 25);
   assert.deepEqual(G.KZones.validateAll(), []);
   const statics = G.KZones.all().flatMap(z => z.staticBosses.map(s => [s.dex, s.level]));
-  for (const [dex, lv] of [[145, 50], [144, 50], [146, 50], [150, 70], [143, 30]]) {
+  for (const [dex, lv] of [[145, 50], [144, 50], [146, 50], [150, 70], [143, 30], [94, 35]]) {
     assert.ok(statics.some(([d, l]) => d === dex && l === lv), 'estático #' + dex + ' Nv.' + lv);
   }
-  const league = G.KZones.get('kanto_18_indigo_league');
-  assert.ok(league.gauntlet && !league.wildSpawnGroups.length);
+  const league = G.KZones.get('kanto_league');
+  assert.ok(league.gauntlet && !league.entries.length);
+  assert.equal(G.KZones.get('kanto_24_cerulean_cave').requires, 'league');
   assert.ok(G.GEN1.league.find(t => t.id === 'champion').teams.flat().every(([, l]) => l >= 53 && l <= 65));
-  assert.equal(G.KZones.get('kanto_11_safari_zone').pvpMode, 'none');
+  assert.equal(G.KZones.get('kanto_17_safari').pvpMode, 'none');
   assert.ok(G.KZones.all().filter(z => z.pvpMode !== 'none').every(z => z.pvpMode === 'duel_opt_in'), 'nada de PvP libre');
+  // Los de adquisición especial nunca son salvajes.
+  const wild = new Set(G.KZones.all().flatMap(G.KZones.species));
+  for (const dex of G.KANTO_WORLD.specialAcquisition) assert.ok(!wild.has(dex), '#' + dex + ' no es salvaje');
+  // Los ids que usan los regalos, el laboratorio, la Liga y el botín existen.
+  for (const g of G.KCFG.GIFTS) assert.ok(G.KZones.get(g.zoneId), g.id);
+  assert.ok(G.KZones.get(G.KCFG.FOSSIL_LAB_ZONE) && G.KZones.get(G.KCFG.LEAGUE.zoneId));
+  for (const id of Object.keys(G.KLoot.ZONE_EXTRA)) assert.ok(G.KZones.get(id), 'botín de ' + id);
 });
 
 test('validador de evolución por nivel (apartado 37)', () => {
   const { G } = boot();
   const caps = { 10: 7, 11: 10, 41: 22, 74: 25, 50: 26, 72: 30, 86: 34 };
   for (const [dex, lv] of Object.entries(caps)) assert.equal(G.KZones.levelEvoCap(+dex), lv, '#' + dex);
-  const z = G.KZones.get('kanto_02_viridian_forest');
-  const bad = JSON.parse(JSON.stringify(G.KANTO_ZONES_SEED.zones.find(x => x.id === z.id)));
-  bad.wild.find(w => w.dex === 10).level = [3, 7];
-  const errs = G.KZones.validate(G.KZones.build(bad, z.map));
-  assert.ok(errs.some(e => /#10: sale a Nv\.7 pero evoluciona a Nv\.7/.test(e)), errs.join('\n'));
-  // Otros errores de datos y de mapa.
-  bad.wild[0].level = [9, 4];
-  bad.wild.push({ dex: 999, level: [3, 4], rarity: 'common' });
-  const map = JSON.parse(JSON.stringify(z.map));
-  map.markers.spawn = [{ tx: 0, ty: 0 }];
-  map.markers.exits = [{ tx: 500, ty: 3, r: 1 }];
-  const errs2 = G.KZones.validate(G.KZones.build(bad, map));
-  for (const re of [/mínimo > máximo/, /#999: especie desconocida/, /spawn en pared/, /exits fuera del mapa/]) assert.ok(errs2.some(e => re.test(e)), re + '\n' + errs2.join('\n'));
+  // Caterpie en un tramo de Nv.20-30: se queda por debajo de Nv.7.
+  const raw = JSON.parse(JSON.stringify(G.KANTO_WORLD.zones.find(x => x.id === 'kanto_03_viridian_forest')));
+  raw.level = [20, 30];
+  const z = G.KZones.build(raw, 2);
+  const cat = z.entries.find(e => e.dex === 10);
+  assert.ok(cat.maxLevel < 7 && cat.minLevel <= cat.maxLevel, JSON.stringify(cat));
+  assert.deepEqual(G.KZones.validate(z), []);
+  // Otros errores de datos.
+  raw.fauna.common.push(999, 133);
+  raw.fauna.legendary = [16];
+  raw.theme = 'plasma';
+  const errs = G.KZones.validate(G.KZones.build(raw, 2));
+  for (const re of [/#999: especie desconocida/, /#133: es de adquisición especial/, /escalón desconocido legendary/, /tema desconocido plasma/]) {
+    assert.ok(errs.some(e => re.test(e)), re + '\n' + errs.join('\n'));
+  }
+});
+
+// ---------------- MUNDO ----------------
+
+test('mundo: un solo camino hacia el norte; cada tramo dura lo configurado a velocidad normal', () => {
+  const { G } = boot();
+  const KW = G.KWorld, D = G.KANTO_WORLD;
+  const w = KW.build({ leagueOpen: false });
+  assert.equal(w.zones.length, 25);
+  let y = w.zones[0].yS;
+  for (const zz of w.zones) {
+    assert.equal(zz.yS, y, zz.z.id + ' empieza donde acaba el anterior');
+    assert.ok(zz.yN < zz.yS, zz.z.id + ' avanza hacia el norte');
+    y = zz.yN;
+    const min = zz.pathTiles * 32 / zz.speed / 60;
+    assert.ok(Math.abs(min - zz.minutes) / zz.minutes < 0.06, `${zz.z.id}: ${min.toFixed(2)} min, configurado ${zz.minutes}`);
+    assert.equal(zz.width, D.width[zz.z.size], zz.z.id + ' ancho');
+    assert.ok(zz.len > zz.width || zz.z.size === 'PLAZA' || zz.z.size === 'SHORT', zz.z.id + ': más largo que ancho');
+  }
+  // Rutas largas 3-4 min, las extensas (mar, Safari) 5-6.
+  for (const zz of w.zones) {
+    if (zz.z.size === 'LONG') assert.ok(zz.minutes >= 3 && zz.minutes <= 4, zz.z.id);
+    if (zz.z.size === 'SEA' || zz.z.size === 'OPEN') assert.ok(zz.minutes >= 5 && zz.minutes <= 6, zz.z.id);
+  }
+});
+
+test('mundo: el camino es transitable, los checkpoints son suelo seguro y es determinista', () => {
+  const { G } = boot();
+  const KW = G.KWorld;
+  const w = KW.build({ leagueOpen: true });
+  for (const zz of w.zones) {
+    for (let ty = Math.min(zz.yS - 1, -2); ty > Math.max(zz.yN, w.top + 2); ty--) {
+      const c = Math.round(KW.cx(ty));
+      const t = KW.terrain(c, ty);
+      // En el mar la barra de arena se corta a ratos: agua que se cruza vadeando.
+      assert.ok(t === KW.F || (zz.z.style === 'sea' && t === KW.L), `${zz.z.id}: camino cortado en (${c}, ${ty})`);
+    }
+    const cp = zz.checkpoint;
+    assert.ok(cp && cp.zoneId === zz.z.id && cp.ty < zz.yS && cp.ty > zz.yN, zz.z.id + ' checkpoint dentro del tramo');
+    for (let b = -2; b <= 2; b++) for (let a = -3; a <= 3; a++) assert.equal(KW.terrain(cp.tx + a, cp.ty + b), KW.F, zz.z.id + ' checkpoint despejado');
+    const p = KW.center(cp.tx, cp.ty);
+    assert.equal(KW.safeAt(p.x, p.y), cp);
+  }
+  const sea = w.zones.find(zz => zz.z.style === 'sea').z;
+  assert.equal(G.Tiles.BIOMES[G.KZones.paletteOf(sea.theme)].liquid, 'water', 'el agua del mar no hace daño');
+  const sample = () => { const out = []; for (let ty = -3; ty > w.top; ty -= 37) for (let tx = 0; tx < w.W; tx += 5) out.push(KW.cell(tx, ty)); return out.join(''); };
+  const a = sample();
+  KW.build({ leagueOpen: true });
+  assert.equal(sample(), a, 'misma semilla, mismo mundo');
+});
+
+test('mundo: la Liga cierra el norte hasta vencerla; tamaños configurables sin tocar el generador', () => {
+  const { G } = boot();
+  const KW = G.KWorld, D = G.KANTO_WORLD;
+  KW.build({ leagueOpen: false });
+  const lg = KW.zoneInfo('kanto_league');
+  const row = lg.yN + 1;
+  for (let tx = 0; tx < KW.built.W; tx++) assert.notEqual(KW.terrain(tx, row), KW.F, 'barrera en x=' + tx);
+  KW.setLeagueOpen(true);
+  assert.equal(KW.terrain(Math.round(KW.cx(row)), row), KW.F, 'abierta al vencerla');
+  // Cambiar los minutos de una clase cambia el largo de sus tramos.
+  const before = KW.zoneInfo('kanto_03_viridian_forest').len;
+  D.minutes['MEDIUM-LONG'] *= 2;
+  KW.build({ leagueOpen: true });
+  const after = KW.zoneInfo('kanto_03_viridian_forest').len;
+  assert.ok(after > before * 1.8 && after < before * 2.2, before + ' -> ' + after);
 });
 
 // ---------------- POKÉMON ----------------
@@ -207,7 +287,7 @@ test('evolución por piedra y por Cable Conector: conserva todo y el % de vida',
 
 // ---------------- CAPTURA ----------------
 
-function zoneRun(G, zoneId = 'kanto_01_route_green') {
+function zoneRun(G, zoneId = 'kanto_01_pallet_route1') {
   const zone = G.KZones.get(zoneId);
   const inst = G.KSave.addPokemon(G.KMon.create({ dex: 4, level: 5, from: 'starter' }));
   return { zone, inst, sess: G.KRewards.newSession(zone, inst) };
@@ -357,7 +437,7 @@ test('partida: una vieja (v3) recibe el bloque Kanto sin tocar lo demás; recarg
   G.KSave.migrate(old);
   G.KSave.sanitize(old);
   assert.equal(old.coins, 1234); assert.deepEqual(old.owned, { 25: 1 }); assert.deepEqual(old.bag, { mint: 2 });
-  assert.equal(old.kanto.schemaVersion, 1);
+  assert.equal(old.kanto.schemaVersion, 2);
   assert.equal(old.kanto.currencies.pokecoins, G.KCFG.START_POKECOINS);
   // Ida y vuelta (guardar / cargar) con instancias y bolsa.
   G.DB.save = old;
@@ -385,13 +465,42 @@ test('partida: una vieja (v3) recibe el bloque Kanto sin tocar lo demás; recarg
   assert.ok(back.kanto.pokemonInstances[q.id] && back.kanto.pokemonInstances[p.id]);
 });
 
-test('mapas: el editor y el juego usan el mismo formato; el generador es determinista', () => {
+test('partida: una del schema 1 (19 zonas sueltas) pasa a los tramos del mundo continuo', () => {
   const { G } = boot();
-  const { generate } = require('../tools/build_kanto_maps.js');
-  const seed = JSON.parse(source('tools/data/KANTO_ZONES_V1.json'));
-  const a = generate(seed.zones[0], 0), b = generate(seed.zones[0], 0);
-  assert.deepEqual(a, b);
-  assert.deepEqual(G.KZones.validateMap(a), []);
-  for (const z of seed.zones) assert.deepEqual(JSON.parse(source('tools/data/kanto-maps/' + z.id + '.json')), G.KANTO_MAPS[z.id], z.id + ' empaquetado');
-  assert.ok(fs.existsSync(path.join(root, 'tools/map-editor.html')) && fs.existsSync(path.join(root, 'tools/map-editor.js')));
+  const s1 = { kanto: G.KSave.blank() };
+  s1.kanto.schemaVersion = 1;
+  const r = s1.kanto.regionProgress.kanto;
+  delete r.lastCheckpoint;
+  r.discoveredZones = { kanto_01_route_green: 5, kanto_03_pewter_mt_moon: 6, kanto_18_indigo_league: 7 };
+  r.statics = { 'kanto_10_fuchsia_routes:143': 8, 'kanto_19_cerulean_cave:150': 9 };
+  r.zoneStats = { kanto_02_viridian_forest: { kills: 12 } };
+  const p = G.KMon.create({ dex: 10, level: 3 });
+  p.caught = { zoneId: 'kanto_02_viridian_forest', level: 3, timestamp: 1 };
+  s1.kanto.pokemonInstances[p.id] = p;
+  G.KSave.migrate(s1);
+  const n = s1.kanto.regionProgress.kanto;
+  assert.equal(s1.kanto.schemaVersion, 2);
+  assert.equal(n.lastCheckpoint, null);
+  for (const id of ['kanto_01_pallet_route1', 'kanto_02_viridian_route2', 'kanto_04_pewter_route3', 'kanto_05_mt_moon', 'kanto_league']) assert.ok(n.discoveredZones[id], id);
+  assert.ok(Object.keys(n.discoveredZones).every(id => G.KZones.get(id)), 'sólo ids nuevos');
+  assert.ok(n.statics['kanto_16_routes_16_18:143'] && n.statics['kanto_24_cerulean_cave:150']);
+  assert.equal(n.zoneStats.kanto_03_viridian_forest.kills, 12);
+  assert.equal(s1.kanto.pokemonInstances[p.id].caught.zoneId, 'kanto_03_viridian_forest');
+  // Volver a migrar no cambia nada.
+  const again = JSON.parse(JSON.stringify(s1));
+  G.KSave.migrate(again);
+  assert.deepEqual(again, s1);
+});
+
+test('viaje: lo ganado cuenta en el tramo donde pasó', () => {
+  const { G } = boot();
+  const { zone, inst, sess } = zoneRun(G);
+  const z2 = G.KZones.get('kanto_02_viridian_route2');
+  G.KRewards.onDefeat(sess, zone, { dex: 16, level: 3, rarity: 'common' }, inst.level, fixed(0.5));
+  G.KRewards.onDefeat(sess, z2, { dex: 19, level: 4, rarity: 'common' }, inst.level, fixed(0.5));
+  G.KRewards.onDefeat(sess, z2, { dex: 19, level: 4, rarity: 'common' }, inst.level, fixed(0.5));
+  G.KRewards.finish(sess, 'exit');
+  const st = G.KSave.region().zoneStats;
+  assert.equal(st[zone.id].kills, 1);
+  assert.equal(st[z2.id].kills, 2);
 });

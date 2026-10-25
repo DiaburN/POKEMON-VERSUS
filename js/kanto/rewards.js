@@ -6,8 +6,9 @@
  * Excepción: una captura se guarda en el acto (captura protegida): nunca se
  * pierde, ni muriendo.
  *
- *   sesión = { zoneId, instId, xp, coins, items: { id: n }, kills, defeated: { dex: n },
- *              captures: [instId], failed: [dex], used: { id: n }, dropped, how }
+ *   sesión = { zoneId (el tramo donde estás), instId, xp, coins, items: { id: n }, kills, defeated: { dex: n },
+ *              captures: [instId], failed: [dex], used: { id: n }, dropped, how,
+ *              zoneKills / zoneCaptures: { zona: n }, visited: [zonas] }
  */
 G.KRewards = (() => {
   const C = () => G.KCFG;
@@ -15,7 +16,8 @@ G.KRewards = (() => {
 
   function newSession(zone, inst) {
     return { zoneId: zone.id, instId: inst.id, startLevel: inst.level, xp: 0, coins: 0, items: {}, kills: 0,
-             defeated: {}, captures: [], failed: [], used: {}, dropped: null, how: null, t0: Date.now() };
+             defeated: {}, captures: [], failed: [], used: {}, dropped: null, how: null, t0: Date.now(),
+             zoneKills: {}, zoneCaptures: {}, visited: [zone.id] };
   }
 
   function addItem(sess, id, n = 1) { if (G.KItems.BY[id] && n > 0) sess.items[id] = (sess.items[id] || 0) + n; }
@@ -33,6 +35,7 @@ G.KRewards = (() => {
     sess.coins += coins + drop.coins;
     for (const id of drop.items) addItem(sess, id);
     sess.kills++;
+    sess.zoneKills[zone.id] = (sess.zoneKills[zone.id] || 0) + 1;
     sess.defeated[w.dex] = (sess.defeated[w.dex] || 0) + 1;
     S().seen(w.dex);
     return { xp, coins: coins + drop.coins, items: drop.items };
@@ -66,6 +69,7 @@ G.KRewards = (() => {
       const inst = G.KMon.create({ dex: w.dex, level: w.level, shiny: !!w.shiny, zoneId: zone.id, from: 'capture' });
       S().addPokemon(inst);
       sess.captures.push(inst.id);
+      sess.zoneCaptures[zone.id] = (sess.zoneCaptures[zone.id] || 0) + 1;
       out.inst = inst;
     } else sess.failed.push(w.dex);
     S().commit();
@@ -108,10 +112,13 @@ G.KRewards = (() => {
     const inst = S().get(sess.instId);
     const before = inst ? { dex: inst.dex, level: inst.level, totalXp: inst.totalXp } : null;
     const events = inst ? G.KMon.gainXp(inst, sess.xp) : [];
+    // Estadísticas por tramo: el mundo es continuo, una salida pasa por varios.
     const zs = S().region().zoneStats;
-    const st = zs[sess.zoneId] = zs[sess.zoneId] || { visits: 0, kills: 0, captures: 0, deaths: 0 };
-    st.visits++; st.kills += sess.kills; st.captures += sess.captures.length;
-    if (how === 'death') st.deaths++;
+    const stat = id => (zs[id] = zs[id] || { visits: 0, kills: 0, captures: 0, deaths: 0 });
+    for (const id of sess.visited) stat(id).visits++;
+    for (const [id, n] of Object.entries(sess.zoneKills)) stat(id).kills += n;
+    for (const [id, n] of Object.entries(sess.zoneCaptures)) stat(id).captures += n;
+    if (how === 'death') stat(sess.zoneId).deaths++;
     S().commit();
     sess.result = { how, zoneId: sess.zoneId, instId: sess.instId, before, xp: sess.xp, coins: sess.coins, items: Object.assign({}, sess.items),
                     kills: sess.kills, defeated: Object.assign({}, sess.defeated), captures: sess.captures.slice(),

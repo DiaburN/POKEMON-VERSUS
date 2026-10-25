@@ -91,29 +91,42 @@ G.KantoUI = (() => {
         <div class="k-mini">${G.KMon.STATS.map(s => `<span>${T(STAT_NAME[s])} <b>${st[s]}</b></span>`).join('')}</div>
       </div>
       <div class="cards k-acts">
-        <button class="card" data-act="go" data-v="zones"><div class="ico">${G.Icons.html('ball', 28)}</div><div class="txt"><div class="nm">Viajar</div><div class="ds">Zonas de Kanto</div></div></button>
+        <button class="card" data-act="go" data-v="zones"><div class="ico">${G.Icons.html('ball', 28)}</div><div class="txt"><div class="nm">Viajar</div><div class="ds">Checkpoints de Kanto</div></div></button>
         <button class="card" data-act="go" data-v="pokemon"><div class="ico">${G.Icons.html('book', 28)}</div><div class="txt"><div class="nm">Pokémon</div><div class="ds">${S().list().length} en tu equipo</div></div></button>
-        <button class="card" data-act="go" data-v="bag"><div class="ico">${G.Icons.html('bag', 28)}</div><div class="txt"><div class="nm">Bolsa y cinturón</div><div class="ds">Lo que llevas a cada zona</div></div></button>
+        <button class="card" data-act="go" data-v="bag"><div class="ico">${G.Icons.html('bag', 28)}</div><div class="txt"><div class="nm">Bolsa y cinturón</div><div class="ds">Lo que llevas de viaje</div></div></button>
         <button class="card" data-act="go" data-v="mart"><div class="ico">${G.Icons.html('shop', 28)}</div><div class="txt"><div class="nm">Poké Mart</div><div class="ds">Balls, pociones y más</div></div></button>
         <button class="card" data-act="heal"><div class="ico">${G.Icons.html('heart', 28)}</div><div class="txt"><div class="nm">Centro Pokémon</div><div class="ds">Recupera los PP de todos (gratis)</div></div></button>
-        ${fossils.length ? `<button class="card" data-act="fossil" ${lab ? '' : 'disabled'}><div class="ico">${G.Icons.html('rock', 28)}</div><div class="txt"><div class="nm">Laboratorio de Cinnabar</div><div class="ds">${lab ? 'Revive un fósil' : 'Descubre Cinnabar para revivir fósiles'}</div></div></button>` : ''}
+        ${fossils.length ? `<button class="card" data-act="fossil" ${lab ? '' : 'disabled'}><div class="ico">${G.Icons.html('rock', 28)}</div><div class="txt"><div class="nm">Laboratorio de Cinnabar</div><div class="ds">${lab ? 'Revive un fósil' : 'Llega a la Mansión Pokémon para revivir fósiles'}</div></div></button>` : ''}
       </div></div>
-      <p class="note">${T('Modo Kanto (beta): la EXP, el botín y las capturas de una zona se aplican al salir de ella.')}</p>`;
+      <p class="note">${T('Modo Kanto (beta): la EXP, el botín y las capturas de un viaje se aplican al salir por un checkpoint.')}</p>`;
   }
 
-  function zoneOpen(i, list) { return i === 0 || S().discovered(list[i - 1].id) || S().discovered(list[i].id); }
+  // Un tramo se abre en el menú al pisar su checkpoint (el primero, siempre).
+  // A los demás se llega andando hacia el norte por el mundo continuo.
+  function zoneOpen(z, i) {
+    if (z.requires === 'league' && !S().region().leagueCleared) return false;
+    return i === 0 || S().discovered(z.id);
+  }
+  function lockText(z) {
+    return z.requires === 'league' && !S().region().leagueCleared ? T('Vence a la Liga para abrir el paso') : T('Llega a pie desde el sur');
+  }
+  function zoneInfo(z) {
+    if (!G.KWorld.built) G.KWorld.build({ leagueOpen: !!S().region().leagueCleared });
+    return G.KWorld.zoneInfo(z.id);
+  }
 
   function zones() {
-    const p = S().active(), list = G.KZones.all();
-    return `<h2>${T('Zonas de Kanto')}</h2>
-      <p class="sub">${T('Las zonas descubiertas siguen abiertas siempre. El nivel recomendado es para tu Pokémon activo')} (${name(p.dex)} Nv.${p.level}).</p>
+    const p = S().active(), list = G.KZones.all(), last = S().region().lastCheckpoint;
+    return `<h2>${T('Kanto')}</h2>
+      <p class="sub">${T('Kanto es un solo camino abierto hacia el norte. Cada tramo empieza en un checkpoint: los que ya has pisado sirven para volver. El nivel recomendado es para tu Pokémon activo')} (${name(p.dex)} Nv.${p.level}).</p>
       <div class="cards k-zones">${list.map((z, i) => {
-        const ok = zoneOpen(i, list), [a, b] = z.recommendedLevel;
+        const ok = zoneOpen(z, i), [a, b] = z.recommendedLevel;
         const fit = p.level < a ? '#ff8a96' : p.level > b ? '#ffb36b' : '#5fe08a';
+        const tag = z.id === last ? T('Último checkpoint') : S().discovered(z.id) ? T('Checkpoint') : T('Inicio');
         return `<button class="card" data-act="zone" data-v="${z.id}" ${ok ? '' : 'disabled'}>
-          <div class="ico" style="background:${G.U.TYPE_COLOR[z.theme] || '#556'}">${G.Icons.html('type:' + z.theme, 28)}</div>
+          <div class="ico" style="background:${G.U.TYPE_COLOR[z.type] || '#556'}">${G.Icons.html('type:' + z.type, 28)}</div>
           <div class="txt"><div class="nm">${esc(T(z.name))}</div>
-          <div class="ds">${ok ? `<span style="color:${fit}">Nv.${a}–${b}</span> · ${S().discovered(z.id) ? T('Descubierta') : T('Nueva')}` : T('Descubre la zona anterior')}</div></div></button>`;
+          <div class="ds">${ok ? `<span style="color:${fit}">Nv.${a}–${b}</span> · ${tag}` : lockText(z)}</div></div></button>`;
       }).join('')}</div>`;
   }
 
@@ -124,11 +137,13 @@ G.KantoUI = (() => {
     const sp = G.KZones.species(z);
     const gifts = C().GIFTS.filter(g => g.zoneId === id);
     const kills = ((S().region().zoneStats[id] || {}).kills) || 0;
+    const info = zoneInfo(z);
     return `<h2>${esc(T(z.name))}</h2>
       <div class="sum-stats">
         <div><span>${T('Nivel recomendado')}</span><b>${a}–${b}</b></div>
         <div><span>${T('Tu Pokémon')}</span><b>${name(p.dex)} Nv.${p.level}</b></div>
-        <div><span>${T('Tema')}</span><b>${G.UI.typeChips([z.theme])}</b></div>
+        <div><span>${T('Tema')}</span><b>${G.UI.typeChips([z.type])}</b></div>
+        ${info ? `<div><span>${T('Recorrido')}</span><b>~${info.minutes} min · ${info.len}×${info.width}</b></div>` : ''}
         <div><span>${T('Combate entre jugadores')}</span><b>${z.pvpMode === 'none' ? T('No') : T('Sólo duelos aceptados')}</b></div>
         <div><span>${T('EXP')}</span><b>${over < 1 ? '×' + over + ' ' + T('(muy por encima)') : '×1'}</b></div>
         <div><span>${T('Derrotados aquí')}</span><b>${kills}</b></div>
@@ -137,7 +152,7 @@ G.KantoUI = (() => {
       ${sp.length ? `<h3>${T('Pokémon salvajes')}</h3><div class="chips">${sp.map(d => `<span class="chip">${disc || S().data().dex.seen[d] ? name(d) : '???'}</span>`).join('')}</div>` : ''}
       ${z.staticBosses.length ? `<h3>${T('Encuentros especiales')}</h3><div class="chips">${z.staticBosses.map(s => `<span class="chip">${disc ? name(s.dex) : '???'} Nv.${s.level}</span>`).join('')}</div>` : ''}
       ${gifts.length ? `<h3>${T('Regalos')}</h3>${gifts.map(g => giftRow(g, kills)).join('')}` : ''}
-      <div class="row" style="margin-top:14px"><button class="btn gold grow" data-act="travel" data-v="${id}">${T('Viajar')}</button></div>`;
+      <div class="row" style="margin-top:14px"><button class="btn gold grow" data-act="travel" data-v="${id}">${T('Ir al checkpoint')}</button></div>`;
   }
 
   function giftState(g, kills) {

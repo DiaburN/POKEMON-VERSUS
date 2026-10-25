@@ -1,65 +1,88 @@
-/* ============ zone.js — una visita a una zona de Kanto (en tiempo real) ============
- * Lo que pasa mientras juegas una zona:
- *   - carga su mapa (G.World.loadMap) con su paleta y los cofres del día
- *   - salvajes por grupos de aparición, con su nivel fijo y su reaparición
- *     según la rareza; estáticos (legendarios) y la Liga, aparte
+/* ============ zone.js — una salida al mundo abierto de Kanto (en tiempo real) ============
+ * El mundo es uno solo y continuo (js/kanto/worldgen.js): se empieza en un
+ * checkpoint ya visitado y se anda hacia el norte (o se vuelve al sur) sin
+ * cargas. Lo que pasa mientras juegas:
+ *   - el tramo en el que estás decide la paleta (con fundido), la música,
+ *     el nivel recomendado y la fauna
+ *   - salvajes por densidad: se mantiene la de tu tramo en la ventana de
+ *     pantalla y media a tu alrededor; salen fuera de la vista y los lejanos
+ *     que no te persiguen se van. Junto a una frontera se mezclan los dos tramos
+ *   - checkpoints: claro seguro con manantial al empezar cada tramo. Al
+ *     llegar a uno queda visitado (se podrá empezar ahí) y es tu último checkpoint
+ *   - jefes (legendarios, Snorlax, Gengar) en su sitio fijo; la Liga en su plaza
  *   - al vencer: EXP pendiente, monedas, botín y el único intento de captura
- *   - objetos rotos (hierba, rocas, cofres): botín de zona (js/kanto/loot.js)
- *   - cinturón, Cuerda Huida (canalizada), ventana para Revivir al caer
- *   - salida: quedarse un momento en el portal de la entrada
+ *   - salida: quedarse un momento en la marca SALIR de un checkpoint,
+ *     Cuerda Huida (canalizada), o caer
  *
- * Al terminar (salida, cuerda, caída...) G.Game.endKanto() cierra la sesión
- * (G.KRewards.finish) y enseña los resultados. Nada de esto sube niveles.
+ * Al terminar G.Game.endKanto() cierra la sesión (G.KRewards.finish) y
+ * enseña los resultados. Nada de esto sube niveles hasta entonces.
  */
 G.KZone = (() => {
   const C = () => G.KCFG;
   const S = () => G.KSave;
+  const KW = () => G.KWorld;
   const TS = () => G.World.TS;
-  const EXIT_HOLD = 1.1;
-  // Música de PokéSurvivor según el tema de la zona.
-  const MUSIC = { rock: 'cave', ground: 'cave', ghost: 'cave', psychic: 'cave', electric: 'cave', ice: 'cave', fire: 'volcano', poison: 'volcano' };
+  const EXIT_HOLD = 1.1, EXIT_R = 1.5;
+  const SPAWN_EVERY = 0.25;                 // s entre intentos de aparición
+  // Música de PokéSurvivor según el tema del tramo.
+  const MUSIC = { rock: 'cave', ground: 'cave', ghost: 'cave', psychic: 'cave', electric: 'cave', ice: 'cave', crystal: 'cave',
+                  dark: 'cave', judgment: 'cave', dragon: 'cave', steel: 'cave', fire: 'volcano', ash: 'volcano', poison: 'volcano' };
 
   let zone = null, sess = null, pl = null;
-  let groups = [], statics = [], league = null;
-  let exitT = 0, rope = null, downT = 0, endT = -1, endHow = null;
+  let statics = [], spawned = new Set(), league = null;
+  let exitT = 0, exitAt = null, rope = null, downT = 0, endT = -1, endHow = null;
   let catches = [];               // animaciones de captura { x, y, t, ok, dex }
-  let clock = 0;
+  let clock = 0, spawnT = 0;
 
-  const tileCenter = (tx, ty) => ({ x: tx * TS() + TS() / 2, y: ty * TS() + TS() - 4 });
   const rnd = () => Math.random();
 
   // ---------------- empezar ----------------
 
   /** Prepara el mundo y devuelve el jugador (lo usa G.Game.startKanto). */
   function begin(zoneId, inst) {
-    zone = G.KZones.get(zoneId);
-    const m = zone.map;
-    const props = m.props.slice();
-    // Cofres de los marcadores (uno de ellos, con candado): sale cada uno con su probabilidad.
-    for (const c of zone.chestSpawns) {
-      if (c.big ? rnd() < 0.6 : rnd() < 0.7) props.push({ type: c.big ? 'bigchest' : 'chest', tx: c.tx, ty: c.ty });
-    }
-    G.World.loadMap(Object.assign({}, m, { props }), Math.floor(rnd() * 1e6));
-    G.World.setBiome(G.Tiles.arenaBiome(zone.theme), true);
+    KW().build({ leagueOpen: !!S().region().leagueCleared });
+    G.World.setGen({ terrain: KW().terrain, props: KW().props }, KW().SEED);
     G.World.setPropHook(onProp);
+    const start = G.KZones.get(zoneId) && KW().checkpointOf(zoneId) ? zoneId : G.KZones.all()[0].id;
+    zone = G.KZones.get(start);
+    G.World.setBiome(G.KZones.paletteOf(zone.theme), true);
     sess = G.KRewards.newSession(zone, inst);
     pl = new G.KantoPlayer(inst);
-    const sp = tileCenter(zone.playerSpawns[0].tx, zone.playerSpawns[0].ty);
-    pl.x = sp.x; pl.y = sp.y;
+    const cp = KW().checkpointOf(start), p = KW().center(cp.tx, cp.ty);
+    pl.x = p.x; pl.y = p.y;
     pl.itemCd = 0;
-    groups = zone.wildSpawnGroups.map(g => ({ def: g, alive: 0, timers: [] }));
-    for (const g of groups) for (let i = 0; i < g.def.maxAlive; i++) spawnIn(g);
-    statics = [];
-    for (const s of zone.staticBosses) if (staticReady(s)) spawnStatic(s);
-    league = zone.gauntlet ? { stage: -1, queue: [], wait: 2, done: false } : null;
-    exitT = 0; rope = null; downT = 0; endT = -1; endHow = null; catches = []; clock = 0;
-    S().discover(zone.id);
-    S().commit();
+    statics = []; spawned = new Set(); league = null;
+    exitT = 0; exitAt = null; rope = null; downT = 0; endT = -1; endHow = null; catches = []; clock = 0; spawnT = 0;
+    reach(cp);
+    for (let i = 0; i < 40 && wildsNear() < target(); i++) spawnOne();
     G.Spawner.say('— ' + zone.name + ' —', 3, true);
     return pl;
   }
 
-  // ---------------- salvajes ----------------
+  /** Has llegado a un checkpoint: visitado y último checkpoint. */
+  function reach(cp) {
+    const r = S().region(), first = !S().discovered(cp.zoneId);
+    S().discover(cp.zoneId);
+    r.lastCheckpoint = cp.zoneId;
+    S().commit();
+    if (first && clock > 0) {
+      G.Spawner.say('Checkpoint: ' + G.KZones.get(cp.zoneId).name, 3, true);
+      G.Audio.sfx('confirm');
+    }
+  }
+
+  // ---------------- salvajes por densidad ----------------
+
+  const win = () => { const d = G.KANTO_WORLD.densityWindow; return { w: d.w * TS(), h: d.h * TS() }; };
+  const inWin = (e, k = 1) => { const v = win(); return Math.abs(e.x - pl.x) <= v.w / 2 * k && Math.abs(e.y - pl.y) <= v.h / 2 * k; };
+  function wildsNear() { return G.EnemyMgr.all().filter(e => e.wild && !e.dead && !e.boss && !e.gone && inWin(e)).length; }
+
+  /** Salvajes que tocan a la vista en este tramo (la media de su densidad). */
+  function target() {
+    if (!zone || zone.gauntlet) return 0;
+    const [a, b] = zone.density;
+    return Math.round((a + b) / 2);
+  }
 
   function pickEntry(entries) {
     const total = entries.reduce((s, e) => s + e.weight, 0);
@@ -67,54 +90,87 @@ G.KZone = (() => {
     return entries.find(e => (r -= e.weight) < 0) || entries[entries.length - 1];
   }
 
-  /** Un sitio libre dentro del rectángulo (en tiles), lejos del jugador y fuera de la zona segura. */
-  function freeSpot(rect, r = 14, nearPlayerOk = false) {
-    for (let i = 0; i < 40; i++) {
-      const tx = rect.x + Math.floor(rnd() * rect.w), ty = rect.y + Math.floor(rnd() * rect.h);
-      const p = tileCenter(tx, ty);
-      if (G.World.terrainAt(tx, ty) !== G.World.FLOOR || !G.World.isFree(p.x, p.y, r)) continue;
-      if (G.KZones.inSafe(zone, p.x, p.y)) continue;
-      if (!nearPlayerOk && pl && G.U.dist2(p.x, p.y, pl.x, pl.y) < C().SPAWN_MIN_DIST ** 2) continue;
-      return p;
+  const swims = dex => (G.DEX_BY[dex] || { types: [] }).types.includes('water');
+
+  /** ¿Cabe aquí un salvaje de esa especie? Suelo (o agua si nada), libre y fuera de los checkpoints. */
+  function fits(x, y, dex, r = 14) {
+    const t = G.World.terrainAt(Math.floor(x / TS()), Math.floor(y / TS()));
+    const water = t === G.World.LIQUID && swims(dex) && G.World.liquidKind() === 'water';
+    if (t !== G.World.FLOOR && !water) return false;
+    if (!G.World.isFree(x, y, r, water)) return false;
+    return !KW().safeAt(x, y);
+  }
+
+  /** Uno nuevo en la ventana, fuera de la vista y lejos de ti. */
+  function spawnOne() {
+    const v = win();
+    for (let i = 0; i < 24; i++) {
+      const x = pl.x + (rnd() - 0.5) * v.w, y = pl.y + (rnd() - 0.5) * v.h;
+      if (G.U.dist2(x, y, pl.x, pl.y) < C().SPAWN_MIN_DIST ** 2 || (clock > 0 && G.Camera.sees(x, y, 40))) continue;
+      // La fauna es la del tramo de ese punto; cerca de la frontera, a veces la del vecino.
+      let z = G.KZones.get((KW().zoneAt(y) || {}).id);
+      const blend = KW().faunaBlend(y);
+      if (blend.other && rnd() < blend.k) z = G.KZones.get(blend.other.id);
+      if (!z || z.gauntlet || !z.entries.length) return null;
+      const e = pickEntry(z.entries);
+      if (!fits(x, y, e.dex)) continue;
+      const level = e.minLevel + Math.floor(rnd() * (e.maxLevel - e.minLevel + 1));
+      const w = new G.WildMon({ dex: e.dex, level, x, y, rarity: e.rarity });
+      w.zone = z;
+      G.EnemyMgr.add(w);
+      G.Sprites.preload([e.dex], 4000);
+      return w;
     }
     return null;
   }
 
-  function spawnIn(g) {
-    const e = pickEntry(g.def.entries);
-    const p = freeSpot(g.def.rect);
-    if (!p) { g.timers.push(3); return null; }
-    const level = e.minLevel + Math.floor(rnd() * (e.maxLevel - e.minLevel + 1));
-    const w = new G.WildMon({ dex: e.dex, level, x: p.x, y: p.y, group: g, rarity: e.rarity });
-    G.EnemyMgr.add(w);
-    g.alive++;
-    G.Sprites.preload([e.dex], 4000);
-    return w;
+  /** Mantiene la densidad: salen los que faltan, se van los lejanos que no te persiguen. */
+  function population(dt) {
+    if ((spawnT -= dt) > 0) return;
+    spawnT = SPAWN_EVERY;
+    for (const e of G.EnemyMgr.all()) {
+      if (!e.wild || e.dead || e.boss || e.aggro || e.gone) continue;
+      if (!inWin(e, 1.8) && !G.Camera.sees(e.x, e.y, 80)) e.gone = true;      // G.EnemyMgr lo quita
+    }
+    if (!pl.dead && wildsNear() < target()) spawnOne();
   }
 
-  function respawnDelay(rarity) {
-    const [a, b] = C().RESPAWN[rarity] || C().RESPAWN.common;
-    return a + rnd() * (b - a);
-  }
+  // ---------------- jefes y Liga ----------------
 
-  // Estáticos: uno por visita; tras vencerlo (o fallar la captura) espera STATIC_BOSS_COOLDOWN_H.
-  const staticKey = s => zone.id + ':' + s.dex;
-  function staticReady(s) {
-    if (C().NEVER_WILD.includes(s.dex) && S().list().some(p => p.dex === s.dex)) return false;   // un legendario, una vez
-    const t = S().region().statics[staticKey(s)];
+  // Jefes: uno por salida; tras vencerlo (o fallar la captura) espera STATIC_BOSS_COOLDOWN_H.
+  const staticKey = b => b.zoneId + ':' + b.dex;
+  function staticReady(b) {
+    if (C().NEVER_WILD.includes(b.dex) && S().list().some(p => p.dex === b.dex)) return false;   // un legendario, una vez
+    const t = S().region().statics[staticKey(b)];
     return !t || Date.now() - t > C().STATIC_BOSS_COOLDOWN_H * 3600e3;
   }
-  function spawnStatic(s) {
-    const p = tileCenter(s.tx, s.ty);
-    const w = new G.WildMon({ dex: s.dex, level: s.level, x: p.x, y: p.y, rarity: 'very_rare', boss: true, staticKey: staticKey(s) });
-    G.EnemyMgr.add(w);
-    statics.push(w);
-    G.Sprites.preload([s.dex], 6000);
+  function bossesTick() {
+    for (const b of KW().bosses) {
+      const k = staticKey(b);
+      if (spawned.has(k)) continue;
+      const p = KW().center(b.tx, b.ty);
+      if (!inWin(p, 1.4)) continue;
+      spawned.add(k);
+      if (!staticReady(b)) continue;
+      const w = new G.WildMon({ dex: b.dex, level: b.level, x: p.x, y: p.y, rarity: 'very_rare', boss: true, staticKey: k });
+      w.zone = G.KZones.get(b.zoneId);
+      G.EnemyMgr.add(w);
+      statics.push(w);
+      G.Sprites.preload([b.dex], 6000);
+    }
   }
 
-  // Liga: los equipos de Gen I, uno detrás de otro, sin capturas.
+  // Liga: los equipos de Gen I, uno detrás de otro, sin capturas. Empieza al pisar su plaza.
   function leagueTick(dt) {
-    if (!league || league.done || G.EnemyMgr.all().some(e => e.trainer && !e.dead)) return;
+    const info = KW().zoneInfo(C().LEAGUE.zoneId);
+    if (!info || !info.arena) return;
+    const a = KW().center(info.arena.tx, info.arena.ty);
+    if (!league) {
+      if (S().region().leagueCleared || pl.dead || G.U.dist2(pl.x, pl.y, a.x, a.y) > (7 * TS()) ** 2) return;
+      league = { stage: -1, queue: [], wait: 1.2, done: false, at: a };
+      G.Spawner.say('Meseta Añil: ¡el Alto Mando te espera!', 3, true);
+    }
+    if (league.done || G.EnemyMgr.all().some(e => e.trainer && !e.dead)) return;
     if ((league.wait -= dt) > 0) return;
     if (league.queue.length) { nextLeagueMon(); return; }
     const L = C().LEAGUE;
@@ -123,9 +179,11 @@ G.KZone = (() => {
       league.done = true;
       S().region().leagueCleared = true;
       S().commit();
-      G.Spawner.say('¡Has vencido a la Liga Pokémon!', 5, true);
+      // El paso al norte (Cueva Celeste) se abre.
+      KW().setLeagueOpen(true);
+      G.World.refreshRows(info.yN - 4, info.yN + 6);
+      G.Spawner.say('¡Has vencido a la Liga Pokémon! El paso al norte está abierto', 5, true);
       G.Audio.sfx('legend');
-      endT = 4; endHow = 'league';
       return;
     }
     const id = L.order[league.stage];
@@ -138,25 +196,25 @@ G.KZone = (() => {
     league.wait = 1.5;
   }
   function nextLeagueMon() {
-    const n = league.queue.shift();
-    const b = zone.map.markers.boss[0];
-    const p = tileCenter(b.tx, b.ty);
-    G.EnemyMgr.add(new G.WildMon({ dex: n.dex, level: n.level, x: p.x, y: p.y, rarity: 'rare', boss: true, trainer: true }));
+    const n = league.queue.shift(), p = league.at;
+    const w = new G.WildMon({ dex: n.dex, level: n.level, x: p.x, y: p.y - 3 * TS(), rarity: 'rare', boss: true, trainer: true });
+    w.zone = G.KZones.get(C().LEAGUE.zoneId);
+    G.EnemyMgr.add(w);
     G.Sprites.preload([n.dex], 4000);
   }
 
   /** Lo llama un salvaje al caer (js/kanto/wild.js). */
   function onWildDown(e) {
     if (!sess || sess.how) return;
+    const z = e.zone || zone;
     const mul = { xp: pl.xpMul || 1, coins: pl.coinMul || 1 };
-    const got = G.KRewards.onDefeat(sess, zone, e, pl.level, rnd, mul);
+    const got = G.KRewards.onDefeat(sess, z, e, pl.level, rnd, mul);
     G.FX.dmgText(e.x, e.y - e.bodyH - 10, '+' + got.xp + ' EXP', '#7fe0ff', true);
     G.FX.dmgText(e.x + 18, e.y - e.bodyH + 4, '+' + got.coins, '#ffd23f');
     for (const id of got.items) itemText(e.x, e.y, id);
-    if (e.group) { e.group.alive--; e.group.timers.push(respawnDelay(e.rarity)); }
     if (e.staticKey) { S().region().statics[e.staticKey] = Date.now(); S().commit(); }
     if (e.trainer && league) { league.wait = league.queue.length ? 0.9 : C().LEAGUE.pause; return; }
-    const cap = G.KRewards.tryCapture(sess, zone, e, rnd);
+    const cap = G.KRewards.tryCapture(sess, z, e, rnd);
     if (cap) {
       catches.push({ x: e.x, y: e.y, t: 0, ok: cap.success, dex: e.dex, name: e.name, level: e.level, ball: cap.ball });
       G.Audio.sfx('confirm');
@@ -168,11 +226,12 @@ G.KZone = (() => {
     G.FX.ring(x, y, 6, 40, '#ffe14d', 0.4, 3);
   }
 
-  /** Objeto roto: botín de zona en lugar del de PokéSurvivor (world.js). */
+  /** Objeto roto: botín del tramo donde está, en lugar del de PokéSurvivor (world.js). */
   function onProp(p) {
     if (!sess || !['grass', 'rock', 'chest', 'bigchest'].includes(p.type)) return false;
+    const z = G.KZones.get((KW().zoneAt(p.y) || {}).id) || zone;
     const B = G.Tiles.BIOMES[G.World.biome];
-    const got = G.Loot.roll(p.type, zone, rnd);
+    const got = G.Loot.roll(p.type, z, rnd);
     if (p.type === 'grass') { G.Audio.sfx('grass'); G.FX.burst(p.x, p.y - 6, B.grass[1], 6, 70); }
     else if (p.type === 'rock') { G.Audio.sfx('break'); G.FX.burst(p.x, p.y - 10, B.rock[1], 14, 140); }
     else { G.Audio.sfx('chest'); G.FX.burst(p.x, p.y - 10, '#f2c443', p.type === 'bigchest' ? 34 : 22, 200); G.Camera.kick(0.3); }
@@ -183,16 +242,26 @@ G.KZone = (() => {
 
   // ---------------- cada fotograma ----------------
 
+  /** El tramo bajo tus pies: paleta (con fundido), aviso y sesión. */
+  function zoneTick() {
+    const z = G.KZones.get((KW().zoneAt(pl.y) || {}).id);
+    if (!z || z === zone) return;
+    zone = z;
+    sess.zoneId = z.id;
+    if (!sess.visited.includes(z.id)) sess.visited.push(z.id);
+    G.World.setBiome(G.KZones.paletteOf(z.theme));
+    G.Audio.sfx('biome');
+    G.Spawner.say('— ' + z.name + ' —', 3, true);
+  }
+
   function update(dt) {
     clock += dt;
     if (pl.itemCd > 0) pl.itemCd -= dt;
-    for (const g of groups) {
-      for (let i = g.timers.length - 1; i >= 0; i--) {
-        if ((g.timers[i] -= dt) > 0) continue;
-        g.timers.splice(i, 1);
-        if (g.alive < g.def.maxAlive) spawnIn(g);
-      }
-    }
+    zoneTick();
+    const cp = KW().safeAt(pl.x, pl.y);
+    if (cp && S().region().lastCheckpoint !== cp.zoneId) reach(cp);
+    population(dt);
+    bossesTick();
     leagueTick(dt);
     for (const c of catches) c.t += dt;
     catches = catches.filter(c => {
@@ -228,11 +297,15 @@ G.KZone = (() => {
       }
     }
 
-    // Salida: quedarse en el portal.
-    const onExit = zone.exits.some(x => { const p = tileCenter(x.tx, x.ty); return G.U.dist2(p.x, p.y, pl.x, pl.y) < (x.r * TS()) ** 2; });
+    // Salida: quedarse en la marca SALIR del checkpoint.
+    exitAt = cp ? exitMark(cp) : null;
+    const onExit = exitAt && G.U.dist2(exitAt.x, exitAt.y, pl.x, pl.y) < (EXIT_R * TS()) ** 2;
     exitT = onExit ? exitT + dt : 0;
     if (exitT >= EXIT_HOLD) finish('exit');
   }
+
+  /** La marca SALIR de un checkpoint (al otro lado del manantial). */
+  function exitMark(cp) { return KW().center(cp.tx - 3, cp.ty); }
 
   function finish(how) {
     if (!sess || sess.how) return;
@@ -262,17 +335,19 @@ G.KZone = (() => {
 
   // ---------------- consultas (wild.js, HUD) ----------------
 
-  function safeAt(x, y) { return !!zone && G.KZones.inSafe(zone, x, y); }
+  function safeAt(x, y) { return !!KW().safeAt(x, y); }
 
-  /** Un punto donde pasear: dentro de su grupo (o cerca de casa). */
+  /** Un punto donde pasear: cerca de casa. */
   function wanderPoint(e) {
-    const rect = e.group ? e.group.def.rect
-      : { x: Math.floor(e.home.x / TS()) - 4, y: Math.floor(e.home.y / TS()) - 4, w: 9, h: 9 };
-    return freeSpot(rect, e.r, true);
+    for (let i = 0; i < 12; i++) {
+      const x = e.home.x + (rnd() - 0.5) * 9 * TS(), y = e.home.y + (rnd() - 0.5) * 9 * TS();
+      if (fits(x, y, e.dex, e.r)) return { x, y };
+    }
+    return null;
   }
 
   /** El salvaje al que apuntas (para el HUD): nombre, nivel, vida. */
-  function target() {
+  function target_() {
     if (!pl) return null;
     const t = pl.target && !pl.target.dead && pl.target.wild ? pl.target : null;
     if (t) return t;
@@ -288,25 +363,30 @@ G.KZone = (() => {
   // ---------------- dibujo (en el mundo) ----------------
 
   function drawGround(ctx) {
-    if (!zone) return;
-    const t = clock;
-    for (const x of zone.exits) {
-      const p = tileCenter(x.tx, x.ty), R = x.r * TS();
-      ctx.save();
-      ctx.globalAlpha = 0.35 + Math.sin(t * 3) * 0.1;
-      ctx.fillStyle = '#7fe0ff';
-      ctx.beginPath(); ctx.ellipse(p.x, p.y - 6, R, R * 0.45, 0, 0, 6.2832); ctx.fill();
-      ctx.globalAlpha = 1;
-      ctx.lineWidth = 2; ctx.strokeStyle = '#d6f6ff';
-      ctx.beginPath(); ctx.ellipse(p.x, p.y - 6, R, R * 0.45, 0, 0, 6.2832); ctx.stroke();
-      if (exitT > 0) {
-        ctx.lineWidth = 4; ctx.strokeStyle = '#ffffff';
-        ctx.beginPath(); ctx.ellipse(p.x, p.y - 6, R + 6, R * 0.45 + 4, 0, -Math.PI / 2, -Math.PI / 2 + 6.2832 * Math.min(1, exitT / EXIT_HOLD)); ctx.stroke();
-      }
-      ctx.font = '800 10px Pixelify, monospace'; ctx.textAlign = 'center'; ctx.fillStyle = '#d6f6ff';
-      G.I18n.rawCanvas(ctx, 'fillText', 'SALIDA', p.x, p.y - R * 0.45 - 12);
-      ctx.restore();
+    if (!zone || !pl) return;
+    const cp = KW().safeAt(pl.x, pl.y) || nearCheckpoint();
+    if (!cp) return;
+    const p = exitMark(cp), R = EXIT_R * TS();
+    ctx.save();
+    ctx.globalAlpha = 0.35 + Math.sin(clock * 3) * 0.1;
+    ctx.fillStyle = '#7fe0ff';
+    ctx.beginPath(); ctx.ellipse(p.x, p.y - 6, R, R * 0.45, 0, 0, 6.2832); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 2; ctx.strokeStyle = '#d6f6ff';
+    ctx.beginPath(); ctx.ellipse(p.x, p.y - 6, R, R * 0.45, 0, 0, 6.2832); ctx.stroke();
+    if (exitT > 0) {
+      ctx.lineWidth = 4; ctx.strokeStyle = '#ffffff';
+      ctx.beginPath(); ctx.ellipse(p.x, p.y - 6, R + 6, R * 0.45 + 4, 0, -Math.PI / 2, -Math.PI / 2 + 6.2832 * Math.min(1, exitT / EXIT_HOLD)); ctx.stroke();
     }
+    ctx.font = '800 10px Pixelify, monospace'; ctx.textAlign = 'center'; ctx.fillStyle = '#d6f6ff';
+    G.I18n.rawCanvas(ctx, 'fillText', 'SALIR', p.x, p.y - R * 0.45 - 12);
+    ctx.restore();
+  }
+
+  /** El checkpoint que tienes cerca (para ver la marca SALIR antes de pisarlo). */
+  function nearCheckpoint() {
+    const tx = Math.floor(pl.x / TS()), ty = Math.floor(pl.y / TS());
+    return (KW().built ? KW().built.checkpoints : []).find(c => Math.abs(c.ty - ty) < 18 && Math.abs(c.tx - tx) < 24) || null;
   }
 
   function drawAir(ctx) {
@@ -329,13 +409,15 @@ G.KZone = (() => {
   }
 
   function end() {
-    zone = null; sess = null; pl = null; groups = []; statics = []; league = null; rope = null; catches = [];
+    zone = null; sess = null; pl = null; statics = []; spawned = new Set(); league = null; rope = null; catches = [];
     G.World.setPropHook(null);
   }
 
   return {
-    begin, update, finish, end, useBelt, onWildDown, safeAt, wanderPoint, target, drawGround, drawAir, bossEngaged,
+    begin, update, finish, end, useBelt, onWildDown, safeAt, wanderPoint, target: target_, drawGround, drawAir, bossEngaged,
     get zone() { return zone; }, get music() { return zone ? MUSIC[zone.theme] || 'forest' : null; }, get session() { return sess; }, get rope() { return rope; },
-    get downT() { return downT; }, get exitT() { return exitT; }, get league() { return league; }
+    get downT() { return downT; }, get exitT() { return exitT; }, get league() { return league; },
+    /** Para pruebas: rellena la densidad sin mirar la cámara. */
+    debugFill() { for (let i = 0; i < 60 && wildsNear() < target(); i++) spawnOne(); return wildsNear(); }
   };
 })();

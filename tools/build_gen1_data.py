@@ -20,7 +20,6 @@ Escribe:
                                 ratio de captura, exp. base, movimientos iniciales,
                                 aprendizaje por nivel y evoluciones; tablas de EXP 1..100
   js/data/gen1-moves-meta.js    165 movimientos Gen I: tipo, potencia, precisión, PP, efecto
-  js/data/kanto-zones.js        tools/data/KANTO_ZONES_V1.json tal cual (semilla de zonas)
 """
 import argparse
 import csv
@@ -247,7 +246,6 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--pokered', default=os.path.join(ROOT, 'vendor', 'pokered'))
     ap.add_argument('--pokeapi', default=os.path.join(ROOT, 'vendor', 'pokeapi'))
-    ap.add_argument('--zones', default=os.path.join(ROOT, 'tools', 'data', 'KANTO_ZONES_V1.json'))
     args = ap.parse_args()
     for p in (args.pokered, args.pokeapi):
         if not os.path.isdir(p):
@@ -310,13 +308,7 @@ def main():
         'id = el de PokeAPI (el mismo que usan los movimientos de js/data/moves.js).',
     ]) + '\nG.GEN1_MOVES = [\n' + mrows + '\n];\nG.GEN1_MOVES.BY = {};\nfor (const m of G.GEN1_MOVES) G.GEN1_MOVES.BY[m.id] = m;\n')
 
-    with io.open(args.zones, encoding='utf-8') as f:
-        zones = json.load(f)
-    write(os.path.join(ROOT, 'js', 'data', 'kanto-zones.js'), js_header('kanto-zones.js', [
-        'Lo produce tools/build_gen1_data.py desde tools/data/KANTO_ZONES_V1.json (semilla de las 19 zonas).',
-        'Se valida contra las evoluciones de Gen I al cargar (js/kanto/zones.js) y en tests/kanto.test.cjs.',
-    ]) + '\nG.KANTO_ZONES_SEED = ' + json.dumps(zones, ensure_ascii=False, indent=1) + ';\n')
-    print(f'{len(species)} especies, {len(moves)} movimientos, {len(zones["zones"])} zonas')
+    print(f'{len(species)} especies, {len(moves)} movimientos')
 
 
 if __name__ == '__main__':

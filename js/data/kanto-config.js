@@ -94,25 +94,23 @@ G.KCFG = {
   // Rival de la Liga: variante de su equipo según tu inicial (orden de parties.asm).
   CHAMPION_VARIANT: { 4: 0, 7: 1, 1: 2 },
   FOSSIL_LEVEL: 30,
-  FOSSIL_LAB_ZONE: 'kanto_15_cinnabar',      // donde se revive un fósil (hay que haberla descubierto)
+  FOSSIL_LAB_ZONE: 'kanto_21_pokemon_mansion', // donde se revive un fósil (hay que haberla descubierto)
   GIFT_LEVEL_DEFAULT: 25,
 
   // ---- adquisiciones especiales (apéndice B de la especificación) ----
-  // Regalos: se reciben en la ficha de la zona tras vencer `needKills` salvajes allí.
+  // Regalos: se reciben en la ficha del tramo tras vencer `needKills` salvajes allí.
   // `choice`: eliges uno; `after`: sólo cuando ya tienes ese regalo (el segundo del Dojo).
   GIFTS: [
-    { id: 'celadon-eevee', zoneId: 'kanto_09_celadon_saffron', dex: [133], level: 25, needKills: 15 },
-    { id: 'dojo-1', zoneId: 'kanto_09_celadon_saffron', dex: [106, 107], choice: true, level: 30, needKills: 40 },
-    { id: 'dojo-2', zoneId: 'kanto_09_celadon_saffron', dex: [106, 107], choice: true, other: 'dojo-1', level: 30, needKills: 150, after: 'dojo-1' },
-    { id: 'porygon', zoneId: 'kanto_12_power_plant', dex: [137], level: 26, needKills: 25 }
+    { id: 'celadon-eevee', zoneId: 'kanto_13_routes_7_8', dex: [133], level: 25, needKills: 15 },
+    { id: 'dojo-1', zoneId: 'kanto_13_routes_7_8', dex: [106, 107], choice: true, level: 30, needKills: 40 },
+    { id: 'dojo-2', zoneId: 'kanto_13_routes_7_8', dex: [106, 107], choice: true, other: 'dojo-1', level: 30, needKills: 150, after: 'dojo-1' },
+    { id: 'porygon', zoneId: 'kanto_13_routes_7_8', dex: [137], level: 26, needKills: 25 }
   ],
-  // Estáticos que no están en KANTO_ZONES_V1.json como staticBoss (eventos).
-  EXTRA_STATICS: { kanto_10_fuchsia_routes: [{ dex: 143, level: 30, respawnClass: 'event' }] },
   // Nunca salen como salvajes normales (sólo estáticos o eventos).
   NEVER_WILD: [144, 145, 146, 150, 151],
 
   // ---- Liga (zona sin salvajes: equipos de Alto Mando y Campeón de Gen I, js/data/gen1-progression.js) ----
-  LEAGUE: { zoneId: 'kanto_18_indigo_league', order: ['lorelei', 'bruno', 'agatha', 'lance', 'champion'],
+  LEAGUE: { zoneId: 'kanto_league', order: ['lorelei', 'bruno', 'agatha', 'lance', 'champion'],
             names: { lorelei: 'Lorelei', bruno: 'Bruno', agatha: 'Agatha', lance: 'Lance', champion: 'Campeón' },
             pause: 4, healBetween: 0.25 }
 };

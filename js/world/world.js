@@ -20,9 +20,9 @@
  * Grieta: setArena() convierte una zona lejana del mapa en una arena redonda
  * cerrada por paredes, donde se lucha contra un legendario (systems/rift.js).
  *
- * Mapa hecho a mano (modo Kanto, tools/map-editor.html): loadMap() cambia el
- * terreno infinito por una rejilla fija (fuera de ella, pared) con sus
- * objetos colocados. Las consultas de colisión son las mismas.
+ * Mundo generado (modo Kanto, js/kanto/worldgen.js): setGen() cambia el
+ * terreno infinito por el de un generador ({ terrain(tx, ty), props(cx, cy, N, at) })
+ * que se consulta por chunks igual que el ruido. Las consultas de colisión son las mismas.
  *
  * Los Pokémon voladores, los fantasma y los jefes ignoran el terreno.
  *
@@ -40,7 +40,7 @@ G.World = (() => {
 
   let seed = 1, biome = 0;
   let arena = null;                        // { tx, ty, r } en tiles
-  let map = null;                          // mapa hecho a mano: { w, h, terr, props: Map "cx,cy" -> [...] }
+  let gen = null;                          // generador de mundo (modo Kanto): { terrain, props }
   let propHook = null;                     // botín de los objetos rotos en una zona (js/kanto/zone.js)
   const data = new Map();                  // "cx,cy" -> datos del chunk
   let images = new Map();                  // "cx,cy" -> canvas horneado
@@ -78,7 +78,7 @@ G.World = (() => {
   }
 
   function terrainRaw(tx, ty) {
-    if (map) return tx < 0 || ty < 0 || tx >= map.w || ty >= map.h ? WALL : map.terr[ty * map.w + tx];
+    if (gen) return gen.terrain(tx, ty);
     const ad = arenaDist(tx, ty);
     if (ad < arena_outer()) {
       if (ad >= arena.r) return WALL;
@@ -127,8 +127,8 @@ G.World = (() => {
   const arena_outer = () => (arena ? arena.r + 7 : 0);
 
   function placeProps(c) {
-    if (map) {
-      for (const o of map.props.get(c.cx + ',' + c.cy) || []) {
+    if (gen) {
+      for (const o of gen.props(c.cx, c.cy, N, terrainAt)) {
         if (broken.has(o.tx + ',' + o.ty) || !PROP[o.type]) continue;
         const p = makeProp(o.type, o.tx, o.ty, o.kind | 0);
         c.props.push(p);
@@ -574,30 +574,21 @@ G.World = (() => {
   function reset(s) {
     seed = (s | 0) || 1;
     data.clear(); images.clear(); broken.clear();
-    fade = null; arena = null; map = null; propHook = null;
+    fade = null; arena = null; gen = null; propHook = null;
   }
 
-  // Letras de las filas de un mapa (tools/map-editor.js escribe lo mismo).
-  const MAP_TILE = { '.': FLOOR, '#': WALL, '~': LIQUID };
-
-  /**
-   * Carga un mapa hecho a mano (y olvida el terreno infinito).
-   * @param m { w, h, rows: ["#..~", ...], props: [{ type, tx, ty, kind? }] }
-   */
-  function loadMap(m, s = 1) {
+  /** Usa un generador de mundo (y olvida el terreno infinito). */
+  function setGen(g, s = 1) {
     reset(s);
-    const terr = new Uint8Array(m.w * m.h).fill(WALL);
-    for (let ty = 0; ty < m.h; ty++) {
-      const row = m.rows[ty] || '';
-      for (let tx = 0; tx < m.w; tx++) { const t = MAP_TILE[row[tx]]; if (t != null) terr[ty * m.w + tx] = t; }
+    gen = g;
+  }
+
+  /** Olvida los chunks entre esas filas (en tiles): el generador ha cambiado ahí (la Liga se abre). */
+  function refreshRows(ty0, ty1) {
+    for (const k of [...data.keys(), ...images.keys()]) {
+      const cy = +k.split(',')[1];
+      if ((cy + 1) * N > ty0 && cy * N <= ty1) { data.delete(k); images.delete(k); }
     }
-    const props = new Map();
-    for (const o of m.props || []) {
-      const k = Math.floor(o.tx / N) + ',' + Math.floor(o.ty / N);
-      if (!props.has(k)) props.set(k, []);
-      props.get(k).push(o);
-    }
-    map = { w: m.w, h: m.h, terr, props };
   }
 
   /**
@@ -629,10 +620,10 @@ G.World = (() => {
   }
 
   return {
-    TS, CW, FLOOR, WALL, LIQUID, MAP_TILE, reset, loadMap, setBiome, terrainAt,
+    TS, CW, FLOOR, WALL, LIQUID, reset, setGen, refreshRows, setBiome, terrainAt,
     /** Quién reparte el botín de los objetos rotos (null: el de PokéSurvivor). fn(prop) -> true si lo ha hecho. */
     setPropHook(fn) { propHook = fn; },
-    get map() { return map; }, biomeName, liquidKind, liquidEffect, walkable,
+    get gen() { return gen; }, biomeName, liquidKind, liquidEffect, walkable,
     kindAt, isWall, isLiquid, isFree, collide, projectileBlock, propsInCircle, nearestBreakable,
     damageProp, breakAt, specialsNear, update,
     breakProp(p) { if (!broken.has(p.tx + ',' + p.ty)) destroyProp(p); },
