@@ -28,6 +28,8 @@ G.Stats = (() => {
      */
     taken(mon, cat) {
       if (!mon || !cat) return 1;
+      // Modo Kanto: stats de verdad por nivel (ver js/kanto/damage.js): × 1 / defensa.
+      if (mon.kstats) return G.KDamage.defense(G.KDamage.defStat(mon.kstats, cat));
       return guard(cat === 'special' ? mon.sd : mon.df);
     },
     /** Lado fuerte de un Pokémon: 'physical' | 'special' (empate: físico). */

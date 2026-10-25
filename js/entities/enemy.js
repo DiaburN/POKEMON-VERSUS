@@ -1009,13 +1009,15 @@
           pl.kills++;
           if (pl.abil && pl.abil.kill) pl.abil.kill(pl, e);     // Autoestima y parecidas
           if (e.boss && !e.judge) pl.bosses++;
-          G.Progress.kill(e);
+          if (!e.wild) G.Progress.kill(e);       // (los salvajes del modo Kanto no cuentan para misiones)
           corpses.push(e);
           list.splice(i, 1);
           byId.delete(e.id);
           if (G.Coop.isHost) G.Coop.enemyGone(e, true);
           continue;
         }
+        // Modo Kanto: los salvajes viven en su zona (ver js/kanto/wild.js), sin rezagados.
+        if (e.wild) continue;
         const near = nearestPlayer(players, e.x, e.y) || pl;
         // El duende del tesoro se escapa si no lo atrapas a tiempo.
         if (e.behavior === 'thief' && (e.life -= dt) <= 0) {

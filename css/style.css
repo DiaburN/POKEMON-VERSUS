@@ -996,3 +996,26 @@ html:lang(zh-Hant) { --font: 'Pixelify', 'PingFang TC', 'Microsoft JhengHei', 'N
 html:lang(zh-Hans) { --font: 'Pixelify', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', system-ui, sans-serif; }
 html:lang(zh) body { line-height: 1.5; -webkit-font-smoothing: antialiased; }
 html:lang(zh) .btn, html:lang(zh) .chip { letter-spacing: 0; }
+
+/* ---------- modo Kanto (js/kanto/ui.js) ---------- */
+.k-box { width: min(860px, 100%); }
+#scr-kanto { padding-top: 66px; }
+@media (max-height: 520px) { #scr-kanto { padding-top: 20px; } }
+.menu-item.kanto { border-color: var(--gold); }
+.k-starters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.k-starters .cell { padding: 10px 4px; }
+.k-hub, .k-mon { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+.k-hub .menu-list { flex: 1; min-width: 240px; }
+.k-active { flex: 0 0 220px; text-align: center; }
+.k-active .nm { font-size: 20px; font-weight: 700; margin: 4px 0; }
+.k-mini { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px; font-size: 13px; color: var(--muted); text-align: left; margin-top: 6px; }
+.k-mini b { color: var(--ink); }
+.k-bar { margin: 6px 0 2px; }
+.k-zones .card:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+.k-moves td { padding: 2px 6px 2px 0; }
+.k-belt select { max-width: 60%; }
+.k-res { display: flex; gap: 14px; align-items: center; }
+.k-res .nm { font-size: 18px; font-weight: 700; }
+#k-res-xp { transition: width .4s ease-out; }
+#k-modal .stage { display: block; margin: 8px auto; }
+@media (max-width: 600px) { .k-active { flex-basis: 100%; } .k-starters { grid-template-columns: 1fr 1fr 1fr; gap: 6px; } }

@@ -304,10 +304,10 @@ G.RunUI = (() => {
   }
 
   function showPause(coop = false) {
-    $('pause-sum').innerHTML = pauseSummary();
+    $('pause-sum').innerHTML = G.Game.kanto ? G.KantoUI.pauseSummary() : pauseSummary();
     G.UI.soundControls($('pause-sound'));
     $('pause-coop').classList.toggle('hidden', !coop);
-    $('btn-quit').textContent = coop ? 'Salir de la partida' : 'Abandonar run';
+    $('btn-quit').textContent = G.T(G.Game.kanto ? 'Salir de la zona' : coop ? 'Salir de la partida' : 'Abandonar run');
     G.UI.show('scr-pause');
   }
 

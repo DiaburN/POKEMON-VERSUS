@@ -21,3 +21,6 @@ docs/CONTACTOS_CREADORES.md
 
 # Caché local de wrangler (Cloudflare)
 .wrangler/
+
+# Fuentes externas para los generadores de datos (tools/build_gen1_data.py)
+vendor/

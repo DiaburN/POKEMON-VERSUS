@@ -342,7 +342,8 @@ G.Icons = (() => {
     let cv = cache.get(name);
     if (cv) return cv;
     if (name.startsWith('move:')) {
-      const m = G.Moves.BY_ID[name.slice(5)];
+      // (Modo Kanto: los de Gen I que PokéSurvivor no tiene, con su tipo y su forma.)
+      const m = G.Moves.BY_ID[name.slice(5)] || (G.KMoves && G.KMoves.def(name.slice(5)));
       cv = emblem(m ? m.type : 'normal', m ? m.kind : null);
     } else if (name.startsWith('type:')) {
       cv = emblem(name.slice(5));

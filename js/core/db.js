@@ -27,7 +27,7 @@
 G.DB = (() => {
   const K_ACC = 'ps.accounts', K_SES = 'ps.session', K_SAVE = 'ps.save.';
   const K_CLOUD = 'ps.cloud.', K_MIGRATED = 'ps.migrated.';
-  const VERSION = 3;
+  const VERSION = 4;                 // v4 (25-10-2026): bloque del modo Kanto (save.kanto, ver js/kanto/save.js)
   const START_COINS = 500;
   const SDK = 'https://www.gstatic.com/firebasejs/13.0.0/';
   const NAME_DOMAIN = 'jugadores.pokesurvivor.net';   // sólo para el email interno
@@ -67,7 +67,7 @@ G.DB = (() => {
   // ---------------- partida ----------------
 
   function newSave(name) {
-    return {
+    const s = {
       v: VERSION,
       name,
       created: Date.now(),
@@ -103,6 +103,8 @@ G.DB = (() => {
       stats: { runs: 0, bestTime: 0, bestLevel: 0, totalKills: 0, pulls: 0, coinsEarned: 0, shinies: 0,
                bossesTotal: 0, riftWins: 0, evolutions: 0, missionsDone: 0, groupRuns: 0, bestGroupTime: 0 }
     };
+    if (G.KSave) s.kanto = G.KSave.blank();     // modo Kanto (js/kanto/save.js)
+    return s;
   }
 
   /** Rellena campos que falten en partidas de versiones anteriores. */
@@ -120,6 +122,8 @@ G.DB = (() => {
       s.pupgDone = true;
     }
     s.tickets = Object.assign({ t1: 0, t10: 0 }, s.tickets);
+    // v3 -> v4: el modo Kanto (Pokémon individuales, bolsa, cinturón...). No cambia nada de lo de antes.
+    if (G.KSave) G.KSave.migrate(s);
     sanitize(s);
     s.v = VERSION;
     return s;
@@ -202,6 +206,7 @@ G.DB = (() => {
         s.pban[d] = [...new Set(l.filter(id => typeof id === 'string' && (!G.Moves || G.Moves.BY_ID[id])))].slice(0, 3);
       }
     } else s.pban = {};
+    if (G.KSave) G.KSave.sanitize(s);
     if (G.Upgrades) for (const d of Object.keys(s.pupg || {})) {
       const u = s.pupg[d];
       if (!u || typeof u !== 'object') { delete s.pupg[d]; continue; }
@@ -364,6 +369,8 @@ G.DB = (() => {
       });
     }
     for (const k in older.stats || {}) r.stats[k] = Math.max(r.stats[k] || 0, older.stats[k] || 0);
+    // Modo Kanto: unión de Pokémon, zonas descubiertas, regalos... (ver G.KSave.merge).
+    if (G.KSave) G.KSave.merge(r, older);
     if (r.starter == null) r.starter = older.starter;
     if (r.personality == null) r.personality = older.personality;
     if (r.partner == null || !r.owned[r.partner]) { r.partner = older.partner; r.partnerShiny = older.partnerShiny; }

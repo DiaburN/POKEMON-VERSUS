@@ -20,6 +20,10 @@
  * Grieta: setArena() convierte una zona lejana del mapa en una arena redonda
  * cerrada por paredes, donde se lucha contra un legendario (systems/rift.js).
  *
+ * Mapa hecho a mano (modo Kanto, tools/map-editor.html): loadMap() cambia el
+ * terreno infinito por una rejilla fija (fuera de ella, pared) con sus
+ * objetos colocados. Las consultas de colisión son las mismas.
+ *
  * Los Pokémon voladores, los fantasma y los jefes ignoran el terreno.
  *
  * Coordenadas: (x, y) de una entidad = sus PIES, en el plano del suelo.
@@ -36,6 +40,8 @@ G.World = (() => {
 
   let seed = 1, biome = 0;
   let arena = null;                        // { tx, ty, r } en tiles
+  let map = null;                          // mapa hecho a mano: { w, h, terr, props: Map "cx,cy" -> [...] }
+  let propHook = null;                     // botín de los objetos rotos en una zona (js/kanto/zone.js)
   const data = new Map();                  // "cx,cy" -> datos del chunk
   let images = new Map();                  // "cx,cy" -> canvas horneado
   // Cambio de bioma: durante FADE segundos se funde la paleta vieja con la nueva.
@@ -72,6 +78,7 @@ G.World = (() => {
   }
 
   function terrainRaw(tx, ty) {
+    if (map) return tx < 0 || ty < 0 || tx >= map.w || ty >= map.h ? WALL : map.terr[ty * map.w + tx];
     const ad = arenaDist(tx, ty);
     if (ad < arena_outer()) {
       if (ad >= arena.r) return WALL;
@@ -120,6 +127,15 @@ G.World = (() => {
   const arena_outer = () => (arena ? arena.r + 7 : 0);
 
   function placeProps(c) {
+    if (map) {
+      for (const o of map.props.get(c.cx + ',' + c.cy) || []) {
+        if (broken.has(o.tx + ',' + o.ty) || !PROP[o.type]) continue;
+        const p = makeProp(o.type, o.tx, o.ty, o.kind | 0);
+        c.props.push(p);
+        if (p.solid) c.propAt.set(o.tx + ',' + o.ty, p);
+      }
+      return;
+    }
     for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
       if (c.terr[j * N + i] !== FLOOR) continue;
       const tx = c.cx * N + i, ty = c.cy * N + j;
@@ -368,6 +384,7 @@ G.World = (() => {
       c.props.splice(c.props.indexOf(p), 1);
       c.propAt.delete(p.tx + ',' + p.ty);
     }
+    if (propHook && propHook(p)) return;
     const B = G.Tiles.BIOMES[biome];
     G.Audio.sfx(p.type === 'grass' ? 'grass' : p.type === 'chest' ? 'chest' : 'break');
     if (p.type === 'grass') {
@@ -557,7 +574,30 @@ G.World = (() => {
   function reset(s) {
     seed = (s | 0) || 1;
     data.clear(); images.clear(); broken.clear();
-    fade = null; arena = null;
+    fade = null; arena = null; map = null; propHook = null;
+  }
+
+  // Letras de las filas de un mapa (tools/map-editor.js escribe lo mismo).
+  const MAP_TILE = { '.': FLOOR, '#': WALL, '~': LIQUID };
+
+  /**
+   * Carga un mapa hecho a mano (y olvida el terreno infinito).
+   * @param m { w, h, rows: ["#..~", ...], props: [{ type, tx, ty, kind? }] }
+   */
+  function loadMap(m, s = 1) {
+    reset(s);
+    const terr = new Uint8Array(m.w * m.h).fill(WALL);
+    for (let ty = 0; ty < m.h; ty++) {
+      const row = m.rows[ty] || '';
+      for (let tx = 0; tx < m.w; tx++) { const t = MAP_TILE[row[tx]]; if (t != null) terr[ty * m.w + tx] = t; }
+    }
+    const props = new Map();
+    for (const o of m.props || []) {
+      const k = Math.floor(o.tx / N) + ',' + Math.floor(o.ty / N);
+      if (!props.has(k)) props.set(k, []);
+      props.get(k).push(o);
+    }
+    map = { w: m.w, h: m.h, terr, props };
   }
 
   /**
@@ -589,7 +629,10 @@ G.World = (() => {
   }
 
   return {
-    TS, CW, reset, setBiome, biomeName, liquidKind, liquidEffect, walkable,
+    TS, CW, FLOOR, WALL, LIQUID, MAP_TILE, reset, loadMap, setBiome, terrainAt,
+    /** Quién reparte el botín de los objetos rotos (null: el de PokéSurvivor). fn(prop) -> true si lo ha hecho. */
+    setPropHook(fn) { propHook = fn; },
+    get map() { return map; }, biomeName, liquidKind, liquidEffect, walkable,
     kindAt, isWall, isLiquid, isFree, collide, projectileBlock, propsInCircle, nearestBreakable,
     damageProp, breakAt, specialsNear, update,
     breakProp(p) { if (!broken.has(p.tx + ',' + p.ty)) destroyProp(p); },

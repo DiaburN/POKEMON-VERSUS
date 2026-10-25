@@ -77,8 +77,8 @@
   ]
 }
 </script>
-<link rel="stylesheet" href="css/style.css?v=c68f470baf">
-<script src="js/core/locales.js?v=f74867b398"></script>
+<link rel="stylesheet" href="css/style.css?v=a93330fac2">
+<script src="js/core/locales.js?v=ab9c21b38f"></script>
 <script src="js/noframe.js"></script>
 </head>
 <body>
@@ -181,6 +181,7 @@
     <div class="box">
       <div class="menu-list">
         <button class="menu-item play" data-go="play">Jugar<small>Entra en la mazmorra</small></button>
+        <button class="menu-item kanto" data-go="kanto">Kanto · beta<small>Sube de nivel a tu equipo, zona a zona</small></button>
         <button class="menu-item" data-go="dex">Pokémon<small id="menu-dex-count">Tu colección</small></button>
         <button class="menu-item" data-go="upgrades">Mejoras<small>Haz más fuerte cada run</small></button>
         <button class="menu-item" data-go="shop">Tienda Kecleon<small>Mentas, Cápsulas y MT</small></button>
@@ -602,7 +603,18 @@
   </div>
 </section>
 
+<!-- ====== Modo Kanto (js/kanto/ui.js) ====== -->
+<section id="scr-kanto" class="scr dim hidden" translate="no">
+  <div class="box wide k-box">
+    <div class="row between"><div class="row"><h2 style="margin:0">Kanto</h2><span class="pill" id="k-coins"></span></div><button class="btn small ghost" id="k-back">Volver</button></div>
+    <div id="k-body"></div>
+  </div>
+</section>
+<section id="scr-kmodal" class="scr dim hidden" translate="no">
+  <div class="box center" id="k-modal" style="width:min(520px,100%)"></div>
+</section>
+
 <!-- datos generados -->
-<script defer src="js/app.min.js?v=1a52cc838c"></script>
+<script defer src="js/app.min.js?v=e042244a1c"></script>
 </body>
 </html>

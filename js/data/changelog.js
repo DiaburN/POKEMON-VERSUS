@@ -6,6 +6,10 @@
  * Cada línea en español y en inglés.
  */
 G.CHANGELOG = [
+  { d: '2026-10-25', title: ["Modo Kanto (beta)", "Kanto mode (beta)"], new: [
+    ["Modo Kanto (beta), en el menú: elige Bulbasaur, Charmander o Squirtle y entrena tu propio equipo zona a zona por las 19 zonas de Kanto, de la Ruta Verde a la Liga Pokémon y la Cueva Celeste. Cada Pokémon sube de nivel, aprende los movimientos de Rojo y Azul (como mucho 4) y evoluciona por nivel, piedra o Cable Conector.", "Kanto mode (beta), in the menu: pick Bulbasaur, Charmander or Squirtle and train your own team zone by zone across Kanto's 19 zones, from Route Green to the Pokémon League and Cerulean Cave. Each Pokémon levels up, learns its Red and Blue moves (4 at most) and evolves by level, stone or Link Cable."],
+    ["Al vencer a un salvaje ganas EXP, Pokémonedas y a veces objetos; con una Poké Ball en el cinturón se intenta capturarlo una vez. La EXP se aplica al salir de la zona. Cinturón con pociones, Éteres, Revivir y Cuerda Huida, y Poké Mart con los precios de Rojo.", "Defeating a wild Pokémon gives EXP, PokéCoins and sometimes items; with a Poké Ball on your belt you get one capture attempt. EXP is applied when you leave the zone. Belt with potions, Ethers, Revive and Escape Rope, and a Poké Mart with Red's prices."]
+  ] },
   { d: '2026-10-23', title: ['Ranking de daño a Arceus y Tablas', 'Arceus damage ranking and Plates'], new: [
     ["Botón de YouTube arriba, junto a Novedades: lleva al canal del juego y, cuando hay directo, se pone rojo con «EN DIRECTO» y te lleva a verlo.",
      "YouTube button at the top, next to What's new: it takes you to the game's channel and, when there is a live stream, it turns red with \"LIVE\" and takes you to watch it."],

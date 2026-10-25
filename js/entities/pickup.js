@@ -22,7 +22,8 @@ G.Pickups = (() => {
     ticket:   { color: '#ffd23f', glow: '#c08a10', r: 7 },
     ticket10: { color: '#c47bff', glow: '#8a3fd0', r: 8 },
     item:     { color: '#ffd23f', glow: '#c08a10', r: 9 },      // value = id del objeto
-    sphere:   { color: '#c9b8ff', glow: '#7e5be0', r: 8 }       // value = id de la esfera (orbs.js)
+    sphere:   { color: '#c9b8ff', glow: '#7e5be0', r: 8 },      // value = id de la esfera (orbs.js)
+    kitem:    { color: '#ffd23f', glow: '#c08a10', r: 9 }       // modo Kanto: value = id de js/data/kanto-items.js
   };
   /** Probabilidad de que un Pokémon normal suelte un ticket del gacha. */
   const BOSS_T10 = 1 / 3;               // ticket ×10 de un jefe normal
@@ -189,7 +190,7 @@ G.Pickups = (() => {
       } else {
         // Baya, imán y bomba: su icono pixel art.
         const ICON = { heal: 'berry', magnet: 'magnet', bomb: 'bomb', ticket: 'ticket', ticket10: 'ticket10' };
-        const sz = p.kind === 'ticket10' || p.kind === 'item' || p.kind === 'sphere' ? 24 : 18;
+        const sz = p.kind === 'ticket10' || p.kind === 'item' || p.kind === 'kitem' || p.kind === 'sphere' ? 24 : 18;
         if (p.kind === 'sphere') {
           // Esfera: brillo de su color, para distinguirlas desde lejos.
           ctx.globalAlpha = 0.3 + Math.sin(p.t * 1.5) * 0.12;
@@ -199,14 +200,15 @@ G.Pickups = (() => {
           G.Icons.draw(ctx, 'orb:' + p.value, p.x - sz / 2, y - sz / 2 - 1, sz);
           continue;
         }
-        if (p.kind === 'item') {
+        if (p.kind === 'item' || p.kind === 'kitem') {
           // Objeto: brillo dorado latiendo, para que se vea desde lejos.
           ctx.globalAlpha = 0.35 + Math.sin(p.t * 1.5) * 0.15;
           ctx.fillStyle = '#ffe14d';
           ctx.beginPath(); ctx.arc(p.x, y, 18, 0, 6.2832); ctx.fill();
           ctx.globalAlpha = 1;
         }
-        G.Icons.draw(ctx, p.kind === 'item' ? p.value : ICON[p.kind], p.x - sz / 2, y - sz / 2 - 1, sz);
+        const ic = p.kind === 'item' ? p.value : p.kind === 'kitem' ? G.KItems.BY[p.value].icon : ICON[p.kind];
+        G.Icons.draw(ctx, ic, p.x - sz / 2, y - sz / 2 - 1, sz);
         continue;
       }
       ctx.fillStyle = 'rgba(255,255,255,.8)';

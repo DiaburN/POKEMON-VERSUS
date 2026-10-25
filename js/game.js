@@ -21,6 +21,7 @@ G.Game = (() => {
   let pl = null;
   let caught = [];          // shinies conseguidos en esta run
   let biome = -1;
+  let kanto = false;        // modo Kanto: una zona en curso (js/kanto/zone.js)
 
   const st = { get time() { return time; } };
 
@@ -163,6 +164,59 @@ G.Game = (() => {
     deathT = 0;
 
     state = 'playing';
+  }
+
+  // ---------------- modo Kanto ----------------
+
+  /** Entra en una zona de Kanto con tu Pokémon activo (js/kanto/). */
+  function startKanto(zoneId) {
+    const inst = G.KSave.active();
+    if (!inst || !G.KZones.get(zoneId)) return;
+    holdBy = []; awayBy = null;
+    G.UI.hideAll();
+    G.UI.chrome(false);
+    G.FX.clear(); G.Projectiles.clear(); G.Combat.clearFields(); G.EnemyMgr.clear(); G.Pickups.clear();
+    G.Spawner.reset(); G.Rift.reset(); G.Judgment.reset(); G.Events.reset(); G.Weather.reset(); G.Path.clear(); G.Hazards.clear();
+    G.Orbs.reset();
+    kanto = true;
+    pl = G.KZone.begin(zoneId, inst);
+    time = 0; pendingLevels = 0; caught = [];
+    tampered = true;               // (nunca va al ranking de PokéSurvivor)
+    G.Camera.x = pl.x; G.Camera.y = pl.y; G.Camera.shake = 0;
+    G.Sprites.preload([inst.dex], 8000, pl.shiny);
+    G.Audio.music(G.KZone.music);
+    deathT = 0;
+    state = 'playing';
+  }
+
+  /** La zona ha terminado (salida, cuerda, caída...): resultados y vuelta al menú de Kanto. */
+  function endKanto(res) {
+    if (state === 'over') return;
+    state = 'over';
+    G.Audio.music(null);
+    G.Audio.sfx(res.how === 'death' ? 'gameover' : 'back');
+    G.KZone.end();
+    G.KantoUI.results(res, () => { pl = null; G.Game.toUI(); G.KantoUI.open('hub'); });
+  }
+
+  function kantoUpdate(dt) {
+    time += dt;
+    pl.update(dt);
+    G.Camera.follow(pl.x, pl.y, dt);
+    G.World.update(dt, G.Camera);
+    G.Path.update(dt, [pl]);
+    G.EnemyMgr.update(dt, [pl]);
+    G.EnemyMgr.rebuildGrid();
+    G.Combat.tick(dt, pl, time);
+    G.Projectiles.update(dt, pl, G.EnemyMgr.all());
+    G.Combat.resolve(dt, pl, time);
+    G.Combat.updateFields(dt);
+    G.Hazards.update(dt);
+    G.Interact.update(dt, pl);
+    G.Spawner.tickBanner(dt);
+    G.KZone.update(dt);
+    G.FX.update(dt);
+    if (state === 'playing') G.Audio.music(G.KZone.bossEngaged() ? 'boss' : G.KZone.music);
   }
 
   function quitRun() {
@@ -319,6 +373,7 @@ G.Game = (() => {
 
   function endRun(dead = true) {
     if (state === 'over' || !pl) return;
+    if (kanto) { G.KZone.finish(dead ? 'death' : 'quit'); return; }
     const coop = !!pl.uid;                    // sólo las partidas en grupo le ponen uid
     const wasHost = !!pl.coopHost;
     const team = coop ? G.Coop.members.slice() : [];
@@ -589,12 +644,25 @@ G.Game = (() => {
     }
     if (state === 'ui') {
       // Esc en una subpantalla del menú vuelve al menú.
-      if (G.Input.tap('escape') && !G.UI.isOpen('scr-profile') && ['scr-dex', 'scr-upgrades', 'scr-shop', 'scr-bag', 'scr-gacha', 'scr-friends', 'scr-rank', 'scr-goals'].some(G.UI.isOpen)
+      if (G.Input.tap('escape') && !G.UI.isOpen('scr-profile') && ['scr-dex', 'scr-upgrades', 'scr-shop', 'scr-bag', 'scr-gacha', 'scr-friends', 'scr-rank', 'scr-goals', 'scr-kanto'].some(G.UI.isOpen)
+          && !G.UI.isOpen('scr-kmodal')
           && document.getElementById('pull-fx').classList.contains('hidden')) G.MenuUI.open();
       return;
     }
     if (G.Input.tap('escape') || G.Input.tap('keyp')) { togglePause(); return; }
     if (state !== 'playing' || !pl) return;
+    if (kanto) {
+      // Ataques 1-4 (Q / E para cambiar); cinturón 5-8: curar, PP, revivir, utilidad.
+      for (let i = 0; i < 4; i++) {
+        if (G.Input.tap('digit' + (i + 1)) || G.Input.tap('numpad' + (i + 1))) pl.setActive(i);
+        if (G.Input.tap('digit' + (i + 5)) || G.Input.tap('numpad' + (i + 5))) G.KZone.useBelt(G.KHUD.BELT_KEYS[i]);
+      }
+      if (G.Input.tap('keyq')) pl.cycle(-1);
+      if (G.Input.tap('keye') || G.Input.tap('tab')) pl.cycle(1);
+      if (G.Input.tap('padx')) G.KZone.useBelt('heal');
+      if (G.Input.tap('pady')) G.KZone.useBelt(pl.dead ? 'revive' : 'pp');
+      return;
+    }
     for (let i = 0; i < 4; i++) {
       if (G.Input.tap('digit' + (i + 1)) || G.Input.tap('numpad' + (i + 1))) pl.setActive(i);
     }
@@ -682,6 +750,7 @@ G.Game = (() => {
   function update(dt) {
     const coop = G.Coop.active;
     if (flashT > 0) flashT -= dt;
+    if (kanto) { kantoUpdate(dt); return; }
     // La Sentencia de Arceus: mientras dura la animación, todo lo demás se para.
     if (G.Judgment.cinematic) {
       G.Judgment.cineTick(dt);
@@ -774,6 +843,7 @@ G.Game = (() => {
     G.World.drawGround(ctx, cam);
     G.World.drawLiquid(ctx, cam, t);
     G.Hazards.draw(ctx);
+    if (kanto) G.KZone.drawGround(ctx);
     G.Combat.drawGroundFields(ctx);
     G.Pickups.draw(ctx);
 
@@ -834,6 +904,7 @@ G.Game = (() => {
     G.Projectiles.draw(ctx);
     G.Combat.drawAirFields(ctx);
     G.FX.draw(ctx);
+    if (kanto) G.KZone.drawAir(ctx);
     G.Judgment.drawAir(ctx);
     ctx.restore();
 
@@ -848,7 +919,7 @@ G.Game = (() => {
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, w, h);
     }
-    if (!G.Judgment.cinematic) G.HUD.draw(ctx, w, h, pl, st);
+    if (!G.Judgment.cinematic) (kanto ? G.KHUD : G.HUD).draw(ctx, w, h, pl, st);
     G.Judgment.drawOverlay(ctx, w, h);
     G.Touch.draw(ctx);
     drawAimMark();
@@ -964,7 +1035,7 @@ G.Game = (() => {
   })();
 
   return {
-    init, startRun, everyone, levelXp, flash, offerBond,
+    init, startRun, startKanto, endKanto, everyone, levelXp, flash, offerBond,
     /** Para pruebas: salta el reloj de la run. */
     debugTime(t) { tampered = true; time = t; },
     /** Para grabar vídeos: cámara lenta (0,5 = mitad de velocidad). */
@@ -976,7 +1047,8 @@ G.Game = (() => {
     quit() { if (state !== 'ui' && state !== 'over') quitRun(); },
     /** Para grabar vídeos: abre las cartas de subir de nivel. */
     debugLevelUp() { tampered = true; pl.level++; pendingLevels++; },
-    toUI() { state = 'ui'; if (cv) cv.style.cursor = ''; Backdrop.restore(); },
+    get kanto() { return kanto; },
+    toUI() { state = 'ui'; kanto = false; if (cv) cv.style.cursor = ''; Backdrop.restore(); },
     get state() { return state; }, get player() { return pl; }, st
   };
 })();

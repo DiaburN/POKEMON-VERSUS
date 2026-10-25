@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Editor de mapas · Kanto</title>
+<link rel="stylesheet" href="map-editor.css">
+</head>
+<body>
+<aside id="side">
+  <h1>Editor de mapas</h1>
+  <section>
+    <label>Mapa de zona <select id="zone"></select></label>
+    <div class="row"><button id="b-load-zone">Abrir</button><button id="b-new">Nuevo…</button></div>
+    <div class="row"><label>Ancho <input id="w" type="number" min="16" max="400" value="72"></label><label>Alto <input id="h" type="number" min="16" max="400" value="52"></label></div>
+    <label>Tema <select id="theme"></select></label>
+  </section>
+  <section>
+    <h2>Pintar</h2>
+    <div class="tools" id="tools"></div>
+    <label>Pincel <input id="brush" type="range" min="1" max="7" value="1"> <span id="brush-n">1</span></label>
+  </section>
+  <section>
+    <div class="row"><button id="b-undo" title="Ctrl+Z">Deshacer</button><button id="b-redo" title="Ctrl+Y">Rehacer</button></div>
+    <div class="row"><button id="b-validate">Validar</button><button id="b-export">Exportar JSON</button></div>
+    <label class="file">Importar JSON <input id="f-import" type="file" accept=".json,application/json"></label>
+    <ul id="errors"></ul>
+  </section>
+  <p class="help">Clic: pintar · Clic derecho o Espacio + arrastrar: mover · Rueda: zoom.<br>
+  Zonas (salvajes, segura): arrastra un rectángulo. Goma: quita objetos y marcadores.<br>
+  Al terminar: guarda el JSON en <code>tools/data/kanto-maps/</code> y ejecuta <code>node tools/build_kanto_maps.js --bundle</code>.</p>
+</aside>
+<main><canvas id="cv"></canvas><div id="status"></div></main>
+<script src="../js/core/util.js"></script>
+<script src="map-editor-boot.js"></script>
+<script src="../js/world/tiles.js"></script>
+<script src="../js/data/gen1-progression.js"></script>
+<script src="../js/data/kanto-config.js"></script>
+<script src="../js/data/kanto-zones.js"></script>
+<script src="../js/data/kanto-maps.js"></script>
+<script src="../js/kanto/zones.js"></script>
+<script src="map-editor.js"></script>
+</body>
+</html>
